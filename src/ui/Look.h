@@ -98,13 +98,13 @@ inline void paintPanel(juce::Graphics& g, juce::Rectangle<int> r, const juce::St
 {
     const auto rf = r.toFloat();
     g.setColour(tok::panel);
-    g.fillRoundedRectangle(rf, tok::rCard);
-    g.setColour(tok::edgeSoft);
-    g.drawRoundedRectangle(rf.reduced(0.5f), tok::rCard, 1.f);
+    g.fillRoundedRectangle(rf, 6.f);
+    g.setColour(tok::edge);
+    g.drawRoundedRectangle(rf.reduced(0.5f), 6.f, 1.f);
     if (title.isNotEmpty()) {
         g.setColour(tok::textLabel);
         g.setFont(fSection());
-        g.drawText(title, r.getX() + 12, r.getY() + 4, r.getWidth() - 24, 16, juce::Justification::left);
+        g.drawText(title, r.getX() + 10, r.getY() + 8, r.getWidth() - 20, 18, juce::Justification::left);
     }
 }
 

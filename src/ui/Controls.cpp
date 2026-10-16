@@ -98,7 +98,7 @@ void Knob::mouseDown(const juce::MouseEvent& e)
         juce::Component::SafePointer<Knob> sp(this);
         m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this), [sp](int r) {
             if (sp == nullptr) return;
-            if (r == 1) sp->att->setValueAsCompleteGesture(sp->defNorm);
+            if (r == 1) { sp->att->setValueAsCompleteGesture(sp->defNorm); sp->commit(); }
             else if (r == 2) sp->enterValue();
         });
         return;
@@ -121,7 +121,7 @@ void Knob::mouseDrag(const juce::MouseEvent& e)
 
 void Knob::mouseUp(const juce::MouseEvent&)
 {
-    if (dragging) att->endGesture();
+    if (dragging) { att->endGesture(); commit(); }
     dragging = false;
     repaint();
 }
@@ -130,6 +130,7 @@ void Knob::mouseDoubleClick(const juce::MouseEvent& e)
 {
     if (e.mods.isPopupMenu()) return;
     att->setValueAsCompleteGesture(defNorm);
+    commit();
 }
 
 void Knob::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
@@ -138,7 +139,7 @@ void Knob::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetai
     const float steps = discrete ? std::max(1.f, d.max - d.min) : 50.f;
     const float step = (e.mods.isCtrlDown() || e.mods.isCommandDown() ? 0.25f : 1.f) / steps;
     const float dir = w.deltaY > 0 ? 1.f : (w.deltaY < 0 ? -1.f : 0.f);
-    if (dir != 0.f) att->setValueAsCompleteGesture(juce::jlimit(0.f, 1.f, value + dir * step));
+    if (dir != 0.f) { att->setValueAsCompleteGesture(juce::jlimit(0.f, 1.f, value + dir * step)); commit(); }
 }
 
 bool Knob::keyPressed(const juce::KeyPress& k)
@@ -147,9 +148,9 @@ bool Knob::keyPressed(const juce::KeyPress& k)
     const float steps = discrete ? std::max(1.f, d.max - d.min) : 100.f;
     const float step = (k.getModifiers().isShiftDown() ? 0.2f : 1.f) / steps;
     const int code = k.getKeyCode();
-    if (code == juce::KeyPress::upKey || code == juce::KeyPress::rightKey) { att->setValueAsCompleteGesture(juce::jlimit(0.f, 1.f, value + step)); return true; }
-    if (code == juce::KeyPress::downKey || code == juce::KeyPress::leftKey) { att->setValueAsCompleteGesture(juce::jlimit(0.f, 1.f, value - step)); return true; }
-    if (code == juce::KeyPress::deleteKey || code == juce::KeyPress::backspaceKey) { att->setValueAsCompleteGesture(defNorm); return true; }
+    if (code == juce::KeyPress::upKey || code == juce::KeyPress::rightKey) { att->setValueAsCompleteGesture(juce::jlimit(0.f, 1.f, value + step)); commit(); return true; }
+    if (code == juce::KeyPress::downKey || code == juce::KeyPress::leftKey) { att->setValueAsCompleteGesture(juce::jlimit(0.f, 1.f, value - step)); commit(); return true; }
+    if (code == juce::KeyPress::deleteKey || code == juce::KeyPress::backspaceKey) { att->setValueAsCompleteGesture(defNorm); commit(); return true; }
     if (code == juce::KeyPress::returnKey) { enterValue(); return true; }
     return false;
 }
@@ -166,8 +167,10 @@ void Knob::enterValue()
     juce::Component::SafePointer<Knob> sp(this);
     w->enterModalState(true, juce::ModalCallbackFunction::create([sp, w, prm](int r) {
         if (sp != nullptr && r == 1)
-            if (auto* ed = w->getTextEditor("v"))
+            if (auto* ed = w->getTextEditor("v")) {
                 sp->att->setValueAsCompleteGesture(prm->getValueForText(ed->getText().trim()));
+                sp->commit();
+            }
     }), true);
 }
 
@@ -186,9 +189,10 @@ ParamCombo::ParamCombo(ChillerProcessor& p, int paramId) : pid(paramId)
         setSelectedItemIndex(index, juce::dontSendNotification);
         updating = false;
     });
-    onChange = [this] {
+    onChange = [this, &p] {
         if (updating) return;
         att->setValueAsCompleteGesture(realToNorm(paramDefs()[(size_t) pid], (float) getSelectedItemIndex()));
+        p.historyCommit();
     };
     att->sendInitialUpdate();
 }
@@ -199,9 +203,54 @@ ParamToggle::ParamToggle(ChillerProcessor& p, int paramId, const juce::String& t
     setTooltip(juce::String(paramDefs()[(size_t) pid].name));
     att = std::make_unique<juce::ParameterAttachment>(*p.getParam(pid), [this](float v) {
         setToggleState(v >= 0.5f, juce::dontSendNotification);
+        if (offText.isNotEmpty()) setButtonText(v >= 0.5f ? onText : offText);
     });
-    onClick = [this] { att->setValueAsCompleteGesture(getToggleState() ? 1.f : 0.f); };
+    onClick = [this, &p] { att->setValueAsCompleteGesture(getToggleState() ? 1.f : 0.f); p.historyCommit(); };
     att->sendInitialUpdate();
+}
+
+void ParamToggle::setStateTexts(const juce::String& off, const juce::String& on)
+{
+    offText = off; onText = on;
+    setButtonText(getToggleState() ? onText : offText);
+}
+
+ParamButton::ParamButton(ChillerProcessor& p, int paramId, const juce::String& text, const char* style) : juce::TextButton(text), pid(paramId)
+{
+    setClickingTogglesState(false);
+    setStyle(*this, style);
+    setTooltip(juce::String(paramDefs()[(size_t) pid].name));
+    att = std::make_unique<juce::ParameterAttachment>(*p.getParam(pid), [this](float v) { setToggleState(v >= 0.5f, juce::dontSendNotification); });
+    onClick = [this, &p] { att->setValueAsCompleteGesture(getToggleState() ? 0.f : 1.f); p.historyCommit(); };
+    att->sendInitialUpdate();
+}
+
+void IconButton::paintButton(juce::Graphics& g, bool over, bool down)
+{
+    using namespace tok;
+    auto r = getLocalBounds().toFloat().reduced(0.5f);
+    const bool enabled = isEnabled();
+    g.setColour(!enabled ? raised : (down ? raised.darker(0.15f) : (over ? raised.brighter(0.12f) : raised)));
+    g.fillRoundedRectangle(r, rControl);
+    g.setColour(!enabled ? edgeSoft : (over ? edge.brighter(0.3f) : edge));
+    g.drawRoundedRectangle(r, rControl, 1.f);
+    // 14 x 14 icon box, centred
+    juce::Path p;
+    switch (icon) {
+        case Prev: p.startNewSubPath(9.f, 2.f); p.lineTo(4.f, 7.f); p.lineTo(9.f, 12.f); break;
+        case Next: p.startNewSubPath(5.f, 2.f); p.lineTo(10.f, 7.f); p.lineTo(5.f, 12.f); break;
+        case Undo:
+            p.startNewSubPath(5.f, 3.f); p.lineTo(2.f, 6.f); p.lineTo(5.f, 9.f);
+            p.startNewSubPath(2.f, 6.f); p.lineTo(8.f, 6.f); p.cubicTo(12.4f, 6.f, 12.4f, 13.f, 8.f, 13.f); p.lineTo(6.f, 13.f);
+            break;
+        case Redo:
+            p.startNewSubPath(9.f, 3.f); p.lineTo(12.f, 6.f); p.lineTo(9.f, 9.f);
+            p.startNewSubPath(12.f, 6.f); p.lineTo(6.f, 6.f); p.cubicTo(1.6f, 6.f, 1.6f, 13.f, 6.f, 13.f); p.lineTo(8.f, 13.f);
+            break;
+    }
+    p.applyTransform(juce::AffineTransform::translation(r.getCentreX() - 7.f, r.getCentreY() - 7.f));
+    g.setColour(!enabled ? textDisabled : (over ? textPrimary : textLabel));
+    g.strokePath(p, juce::PathStrokeType(1.7f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 }
 
 } // namespace chui

@@ -8,12 +8,14 @@ public:
     ~ChillerEditor() override;
     void paint(juce::Graphics&) override;
     void resized() override;
+    void tickNow();
+    chui::SpectrumView& explainView() { return *explain; }   // refresh data and displays once (the timer does this at 30 Hz)
 
     // Design canvas; the whole UI is drawn at this size and scaled by one transform.
     static constexpr int kW = 1100, kH = 680;
 
 private:
-    void timerCallback() override;
+    void timerCallback() override { tickNow(); }
 
     struct Content : juce::Component {
         void paint(juce::Graphics& g) override { g.fillAll(chui::tok::bg); }
@@ -21,6 +23,7 @@ private:
 
     ChillerProcessor& proc;
     chui::LookAndFeel laf;
+    chui::UiState state;
     Content content;
     std::unique_ptr<chui::TopBar> top;
     std::unique_ptr<chui::SpectrumView> explain;

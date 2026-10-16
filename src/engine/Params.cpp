@@ -29,7 +29,7 @@ std::vector<ParamDef> buildDefs()
     set(amount, "amount", "Amount", 0.f, 100.f, 50.f, Curve::Lin, "%");
     set(focus, "focus", "Focus", 1.f / 24.f, 1.f, 1.f / 6.f, Curve::Log, "oct");
     set(maxCut, "max_cut", "Max Cut", 0.f, 30.f, 12.f, Curve::Lin, "dB");
-    set(rangeLow, "range_low", "Range Low", 20.f, 20000.f, 40.f, Curve::Log, "Hz");
+    set(rangeLow, "range_low", "Range Low", 20.f, 20000.f, 100.f, Curve::Log, "Hz");
     set(rangeHigh, "range_high", "Range High", 20.f, 20000.f, 18000.f, Curve::Log, "Hz");
     // ---- speed ----
     set(attack, "attack", "Attack", 1.f, 100.f, 10.f, Curve::Log, "ms");
@@ -37,11 +37,12 @@ std::vector<ParamDef> buildDefs()
     set(speedTilt, "speed_tilt", "Speed Tilt", -1.f, 1.f, 0.f);
     // ---- protect ----
     set(transientPass, "transient_pass", "Transient Pass", 0.f, 100.f, 0.f, Curve::Lin, "%");
-    set(harmonicProtect, "harmonic_protect", "Harmonic Protect", 0.f, 100.f, 0.f, Curve::Lin, "%");
+    set(harmonicProtect, "harmonic_protect", "Harmonic Protect", 0.f, 100.f, 30.f, Curve::Lin, "%");
     set(budget, "budget", "Budget", 0.f, 12.f, 6.f, Curve::Lin, "dB");
     // ---- stereo ----
     choice(stereoMode, "stereo_mode", "Stereo Mode", { "L/R", "M/S" }, 0);
     set(link, "link", "Link", 0.f, 100.f, 100.f, Curve::Lin, "%");
+    toggle(scKey, "sc_key", "Sidechain Key", false);
     // ---- output ----
     set(mix, "mix", "Mix", 0.f, 100.f, 100.f, Curve::Lin, "%");
     set(trim, "trim", "Trim", -24.f, 24.f, 0.f, Curve::Lin, "dB");
@@ -49,7 +50,7 @@ std::vector<ParamDef> buildDefs()
     toggle(delta, "delta", "Delta", false);
     toggle(autoGain, "auto_gain", "Auto Gain", false);
     // ---- global ----
-    choice(mode, "mode", "Mode", { "Live", "Mix", "Master" }, 1);
+    choice(mode, "mode", "Mode", { "Live (low latency)", "Mix", "Master" }, 1);
     toggle(bypass, "bypass", "Bypass", false);
     return d;
 }

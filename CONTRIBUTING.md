@@ -1,6 +1,6 @@
 # Contributing to Chiller
 
-Thanks for helping! Chiller is a free, open-source resonance suppressor and is still very young (Foundation, v0.0).
+Thanks for helping! Chiller is a free, open-source resonance suppressor and is still very young (alpha, v0.1).
 Please read the [Code of Conduct](CODE_OF_CONDUCT.md) first, and the roadmap in [docs/PLAN.md](docs/PLAN.md) so your
 work fits the current phase.
 

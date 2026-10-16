@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 using namespace chiller;
@@ -99,6 +100,8 @@ ChillerProcessor::ChillerProcessor()
         raw[(size_t) i] = apvts.getRawParameterValue(defs[(size_t) i].id);
         jassert(params[(size_t) i] && raw[(size_t) i]);
     }
+    hist.push_back(captureState());
+    abState[0] = abState[1] = hist.back();
 }
 
 bool ChillerProcessor::isBusesLayoutSupported(const BusesLayout& l) const
@@ -127,99 +130,212 @@ void ChillerProcessor::prepareToPlay(double sr, int block)
 {
     currentSampleRate = sr;
     maxBlock = std::max(block, 64);
-    numChannelsPrepared = 2;   // stereo main bus; the sidechain bus is optional and unused for now
     activeMode = modeFromRaw(getRaw(pid::mode));
-    engine.prepare(sr, numChannelsPrepared, activeMode);
-    dryDelay.prepare(dsp::fftSizeForMode(dsp::Mode::Master), numChannelsPrepared * 2);   // trimmed + raw copies
+    engine.prepare(sr, activeMode);
+    dryDelay.prepare(dsp::fftSizeFor(dsp::Mode::Master, sr), 2);
     dryDelay.setDelay(engine.latencySamples());
-    wet.setSize(numChannelsPrepared, maxBlock, false, true, false);
-    trimGain.assign((size_t) maxBlock, 1.f);
+    wet.setSize(2, maxBlock, false, true, false);
     auto init = [sr](juce::SmoothedValue<float>& s, float v, double secs = 0.02) { s.reset(sr, secs); s.setCurrentAndTargetValue(v); };
     init(sMix, getReal(pid::mix) / 100.f);
     init(sTrim, juce::Decibels::decibelsToGain(getReal(pid::trim)));
     init(sOutput, juce::Decibels::decibelsToGain(getReal(pid::output)));
     init(sBypass, getReal(pid::bypass), 0.01);
     init(sDelta, getReal(pid::delta), 0.01);
+    init(sAuto, 1.f, 0.1);
+    eDry = eWet = 0.f;
+    eCoef = 1.f - std::exp(-1.f / (0.4f * (float) sr));
     setLatencySamples(engine.latencySamples());
+}
+
+static dsp::SuppressorParams suppressorParams(const ChillerProcessor& p)
+{
+    dsp::SuppressorParams s;
+    s.thresholdDb = p.getReal(pid::threshold);
+    s.amount = p.getReal(pid::amount) / 100.f;
+    s.focusOct = p.getReal(pid::focus);
+    s.maxCutDb = p.getReal(pid::maxCut);
+    s.rangeLowHz = p.getReal(pid::rangeLow);
+    s.rangeHighHz = p.getReal(pid::rangeHigh);
+    s.attackMs = p.getReal(pid::attack);
+    s.releaseMs = p.getReal(pid::release);
+    s.speedTilt = p.getReal(pid::speedTilt);
+    s.transientPass = p.getReal(pid::transientPass) / 100.f;
+    s.harmonicProtect = p.getReal(pid::harmonicProtect) / 100.f;
+    s.budgetDb = p.getReal(pid::budget);
+    s.link = p.getReal(pid::link) / 100.f;
+    s.displayMix = p.getReal(pid::mix) / 100.f * (1.f - p.getReal(pid::bypass));
+    s.midSide = p.getReal(pid::stereoMode) >= 0.5f;
+    s.scKey = p.getReal(pid::scKey) >= 0.5f;
+    return s;
 }
 
 void ChillerProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
+    const auto t0 = std::chrono::steady_clock::now();
     const int total = buffer.getNumSamples();
-    // main bus only: channels 0..1. Any sidechain channels follow in the buffer and are left untouched.
-    const int nch = std::min({ buffer.getNumChannels(), getMainBusNumInputChannels(), numChannelsPrepared });
-    if (nch < 1 || total == 0) return;
+    if (buffer.getNumChannels() < 2 || total == 0) return;   // stereo only (see isBusesLayoutSupported)
+
+    // transport state, so LEARN can wait for the host to start playing
+    {
+        int playing = -1;
+        if (auto* ph = getPlayHead())
+            if (const auto pos = ph->getPosition()) playing = pos->getIsPlaying() ? 1 : 0;
+        hostPlaying.store(playing, std::memory_order_relaxed);
+    }
 
     // The processor reports latency for the current mode; re-sync when the mode parameter changes.
     const auto wanted = modeFromRaw(getRaw(pid::mode));
     if (wanted != activeMode) applyMode(wanted);
+    engine.setParams(suppressorParams(*this));
+
+    // optional sidechain bus (detection only)
+    const float* scIn[2] = { nullptr, nullptr };
+    if (auto* bus = getBus(true, 1); bus != nullptr && bus->isEnabled() && bus->getNumberOfChannels() > 0) {
+        auto scBuf = getBusBuffer(buffer, true, 1);   // a view on the host's channels, no allocation
+        scIn[0] = scBuf.getReadPointer(0);
+        scIn[1] = scBuf.getNumChannels() > 1 ? scBuf.getReadPointer(1) : scIn[0];
+    }
 
     sMix.setTargetValue(getReal(pid::mix) / 100.f);
     sTrim.setTargetValue(juce::Decibels::decibelsToGain(getReal(pid::trim)));
     sOutput.setTargetValue(juce::Decibels::decibelsToGain(getReal(pid::output)));
     sBypass.setTargetValue(getReal(pid::bypass));
-    sDelta.setTargetValue(getReal(pid::delta));   // Delta = dry - wet (what the suppressor removed)
+    const bool deltaOn = getReal(pid::delta) >= 0.5f;
+    sDelta.setTargetValue(deltaOn ? 1.f : 0.f);   // Delta = (dry - wet) * mix: what the suppressor removed
+    const bool autoOn = getReal(pid::autoGain) >= 0.5f;
 
     float pl = 0.f, pr = 0.f;
-    uint32_t w = scopeWrite.load(std::memory_order_relaxed);
     for (int start = 0; start < total; start += maxBlock) {
         const int n = std::min(maxBlock, total - start);
-        std::array<float*, 2> chans {}, wetPtrs {};
-        for (int c = 0; c < nch; ++c) {
-            chans[(size_t) c] = buffer.getWritePointer(c) + start;
-            wetPtrs[(size_t) c] = wet.getWritePointer(c);
-        }
+        float* l = buffer.getWritePointer(0) + start;
+        float* r = buffer.getWritePointer(1) + start;
+        float* wl = wet.getWritePointer(0);
+        float* wr = wet.getWritePointer(1);
+        std::copy(l, l + n, wl);
+        std::copy(r, r + n, wr);
+        engine.process(wl, wr, scIn[0] ? scIn[0] + start : nullptr, scIn[1] ? scIn[1] + start : nullptr, n);
 
-        // wet path input = trimmed input
-        for (int i = 0; i < n; ++i) trimGain[(size_t) i] = sTrim.getNextValue();
-        for (int c = 0; c < nch; ++c)
-            for (int i = 0; i < n; ++i) wetPtrs[(size_t) c][i] = chans[(size_t) c][i] * trimGain[(size_t) i];
-
-        // scope for the spectrum display (mono input, post-trim)
+        // auto gain: compensate by the smoothed energy ratio dry/wet (only ever boosts, capped at +6 dB)
         for (int i = 0; i < n; ++i) {
-            float m = 0.f;
-            for (int c = 0; c < nch; ++c) m += wetPtrs[(size_t) c][i];
-            scope[(w + (uint32_t) i) & (kScopeSize - 1)] = m / (float) nch;
-        }
-        w += (uint32_t) n;
-
-        engine.process(wetPtrs.data(), n);   // Foundation: transparent, latencySamples() late
-
-        for (int i = 0; i < n; ++i) {
-            const float mx = sMix.getNextValue(), og = sOutput.getNextValue(), bp = sBypass.getNextValue(),
-                        dl = sDelta.getNextValue();
-            for (int c = 0; c < nch; ++c) {
-                const float in = chans[(size_t) c][i];
-                const float dry = dryDelay.process(c, in * trimGain[(size_t) i]);   // latency-compensated, trimmed
-                const float rawDelayed = dryDelay.process(c + nch, in);              // for soft bypass
-                const float wetS = wetPtrs[(size_t) c][i];
-                const float processed = dry + (wetS - dry) * mx;                     // dry/wet mix
-                const float listened = processed + ((dry - wetS) - processed) * dl;  // delta listen
-                float y = (listened * og) + (rawDelayed - listened * og) * bp;       // soft bypass keeps latency
+            const float mx = sMix.getNextValue(), tg = sTrim.getNextValue(), og = sOutput.getNextValue(),
+                        bp = sBypass.getNextValue(), dl = sDelta.getNextValue(), ag = sAuto.getNextValue();
+            float eD = 0.f, eW = 0.f;
+            for (int c = 0; c < 2; ++c) {
+                const float in = c == 0 ? l[i] : r[i];
+                const float dry = dryDelay.process(c, in);             // latency-compensated input
+                const float wetS = c == 0 ? wl[i] : wr[i];
+                eD += dry * dry; eW += wetS * wetS;
+                const float processed = dry + (wetS * tg * ag - dry) * mx;
+                const float removed = (dry - wetS) * mx;
+                const float listened = processed + (removed - processed) * dl;
+                float y = listened * og;
+                y += (dry - y) * bp;                                    // soft bypass keeps the latency
                 if (!std::isfinite(y)) y = 0.f;
-                chans[(size_t) c][i] = y;
+                (c == 0 ? l : r)[i] = y;
                 float& pk = c == 0 ? pl : pr;
                 pk = std::max(pk, std::abs(y));
             }
+            eDry += (eD - eDry) * eCoef;
+            eWet += (eW - eWet) * eCoef;
             dryDelay.advance();
         }
+        const float want = autoOn && !deltaOn ? std::clamp(std::sqrt((eDry + 1.0e-9f) / (eWet + 1.0e-9f)), 1.f, 1.995f) : 1.f;
+        sAuto.setTargetValue(want);
     }
-    if (nch < 2) pr = pl;
-    scopeWrite.store(w, std::memory_order_release);
     const float decay = std::exp(-(float) total / (0.25f * (float) currentSampleRate));
     peakL.store(std::max(pl, peakL.load(std::memory_order_relaxed) * decay), std::memory_order_relaxed);
     peakR.store(std::max(pr, peakR.load(std::memory_order_relaxed) * decay), std::memory_order_relaxed);
-}
-
-void ChillerProcessor::copyInputScope(float* dst, int count) const
-{
-    const uint32_t w = scopeWrite.load(std::memory_order_acquire);
-    for (int i = 0; i < count; ++i)
-        dst[i] = scope[(w - (uint32_t) count + (uint32_t) i) & (kScopeSize - 1)];
+    const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    const float inst = (float) (secs / ((double) total / currentSampleRate));
+    cpuLoad.store(cpuLoad.load(std::memory_order_relaxed) * 0.9f + inst * 0.1f, std::memory_order_relaxed);
 }
 
 juce::AudioProcessorEditor* ChillerProcessor::createEditor() { return new ChillerEditor(*this); }
+
+//==============================================================================================
+// State helpers: capture / apply, presets, undo, A/B
+//==============================================================================================
+ParamState ChillerProcessor::captureState() const
+{
+    ParamState s;
+    for (int i = 0; i < pid::count; ++i) s[i] = params[(size_t) i]->getValue();
+    return s;
+}
+
+void ChillerProcessor::applyState(const ParamState& s)
+{
+    for (int i = 0; i < pid::count; ++i) {
+        if (params[(size_t) i]->getValue() == s[i]) continue;
+        params[(size_t) i]->beginChangeGesture();
+        params[(size_t) i]->setValueNotifyingHost(s[i]);
+        params[(size_t) i]->endChangeGesture();
+    }
+}
+
+void ChillerProcessor::setParamReal(int id, float real)
+{
+    auto* p = params[(size_t) id];
+    p->beginChangeGesture();
+    p->setValueNotifyingHost(realToNorm(id, real));
+    p->endChangeGesture();
+}
+
+void ChillerProcessor::loadPreset(int index)
+{
+    const int n = (int) factoryPresets().size();
+    if (n == 0) return;
+    index = ((index % n) + n) % n;
+    auto s = captureState();
+    applyPreset(s, index);
+    applyState(s);
+    presetIndex = index;
+    presetName = factoryPresets()[(size_t) index].name;
+    historyCommit();
+}
+
+void ChillerProcessor::historyCommit()
+{
+    auto s = captureState();
+    if (!hist.empty() && hist[(size_t) histIdx].v == s.v) return;
+    hist.resize((size_t) histIdx + 1);
+    hist.push_back(s);
+    ++histIdx;
+    if (hist.size() > 200) { hist.erase(hist.begin()); --histIdx; }
+}
+
+void ChillerProcessor::undo()
+{
+    if (!canUndo()) return;
+    historyCommit();   // make sure unsaved edits are not lost
+    if (!canUndo()) return;
+    applyState(hist[(size_t) --histIdx]);
+}
+
+void ChillerProcessor::redo()
+{
+    if (!canRedo()) return;
+    applyState(hist[(size_t) ++histIdx]);
+}
+
+void ChillerProcessor::selectAB(int slot)
+{
+    slot = std::clamp(slot, 0, 1);
+    if (slot == abSlot) return;
+    abState[abSlot] = captureState();
+    abValid[abSlot] = true;
+    if (!abValid[slot]) { abState[slot] = abState[abSlot]; abValid[slot] = true; }
+    abSlot = slot;
+    applyState(abState[slot]);
+    historyCommit();
+}
+
+void ChillerProcessor::copyToOtherAB()
+{
+    const int o = 1 - abSlot;
+    abState[o] = captureState();
+    abValid[o] = true;
+}
 
 //==============================================================================================
 // State
@@ -261,6 +377,10 @@ void ChillerProcessor::setStateInformation(const void* data, int size)
         if (params[(size_t) i]->getValue() != v) params[(size_t) i]->setValueNotifyingHost(v);
     }
     if (chTree.isValid()) presetName = chTree.getProperty("preset", "Init").toString();
+    hist.assign(1, captureState());
+    histIdx = 0;
+    abState[0] = abState[1] = hist.back();
+    abValid[0] = true; abValid[1] = false; abSlot = 0;
     // Tell the host every parameter may have new values (CLAP: params rescan; VST3: values changed).
     updateHostDisplay(ChangeDetails().withProgramChanged(true));
 }

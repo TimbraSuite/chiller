@@ -3,35 +3,31 @@
 
 namespace chiller::dsp {
 
-void Engine::prepare(double sampleRate, int numChannels, Mode mode)
+void Engine::prepare(double sampleRate, Mode mode)
 {
     sr = sampleRate;
-    numCh = numChannels;
-    for (int m = 0; m < (int) Mode::Count; ++m) {
-        stft[m].clear();
-        if ((Mode) m == Mode::Live) continue;   // passthrough: no STFT yet
-        for (int c = 0; c < numCh; ++c) stft[m].push_back(std::make_unique<Stft>(fftSizeForMode((Mode) m)));
-    }
+    for (int m = 0; m < (int) Mode::Count; ++m)
+        suppressors[(size_t) m] = std::make_unique<Suppressor>(sr, fftSizeFor((Mode) m, sr), &ui);
     current = mode;
+    active()->setParams(lastParams);
 }
 
 void Engine::reset()
 {
-    for (auto& v : stft) for (auto& s : v) s->reset();
+    for (auto& s : suppressors) if (s) s->reset();
 }
 
 void Engine::setMode(Mode m)
 {
     if (m == current) return;
     current = m;
-    for (auto& s : stft[(int) m]) s->reset();
+    active()->reset();
+    active()->setParams(lastParams);
 }
 
-void Engine::process(float* const* channels, int count)
+void Engine::process(float* l, float* r, const float* scL, const float* scR, int count)
 {
-    if (current == Mode::Live) return;
-    auto& v = stft[(int) current];
-    for (int c = 0; c < numCh && c < (int) v.size(); ++c) v[(size_t) c]->process(channels[c], channels[c], count);
+    if (auto* s = active()) s->process(l, r, scL, scR, count);
 }
 
 void DelayLine::prepare(int maxDelaySamples, int numChannels)

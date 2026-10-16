@@ -42,12 +42,16 @@ CH_TEST(params_planned_values)
     CH_CHECK_NEAR(d(pid::attack).def, 10.0, 1e-6);
     CH_CHECK_NEAR(d(pid::release).def, 120.0, 1e-6);
     CH_CHECK_NEAR(d(pid::maxCut).def, 12.0, 1e-6);
-    CH_CHECK_NEAR(d(pid::rangeLow).def, 40.0, 1e-6);
+    CH_CHECK_NEAR(d(pid::rangeLow).def, 100.0, 1e-6);
     CH_CHECK_NEAR(d(pid::rangeHigh).def, 18000.0, 1e-6);
     CH_CHECK_NEAR(d(pid::mix).def, 100.0, 1e-6);
     CH_CHECK_NEAR(d(pid::trim).min, -24.0, 1e-6);
     CH_CHECK_NEAR(d(pid::output).max, 24.0, 1e-6);
-    CH_CHECK(d(pid::mode).choices.size() == 3 && d(pid::mode).def == 1.f);
+    CH_CHECK(d(pid::mode).choices.size() == 3 && d(pid::mode).def == 1.f && d(pid::mode).choices[0] == "Live (low latency)");
+    CH_CHECK(d(pid::scKey).curve == Curve::Toggle && d(pid::scKey).def == 0.f);
+    CH_CHECK_NEAR(d(pid::budget).def, 6.0, 1e-6);
+    CH_CHECK_NEAR(d(pid::threshold).max, 24.0, 1e-6);
+    CH_CHECK_NEAR(d(pid::maxCut).max, 30.0, 1e-6);
     CH_CHECK(d(pid::stereoMode).choices.size() == 2);
 }
 

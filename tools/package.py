@@ -1,6 +1,6 @@
 """Package a Chiller build into a release zip.
 
-  python tools/package.py --platform windows|macos|linux --version 0.0.1 --artefacts build/Chiller_artefacts/Release --out dist
+  python tools/package.py --platform windows|macos|linux --version 0.1.0 --artefacts build/Chiller_artefacts/Release --out dist
 
 Output: dist/Chiller-<version>-<win64|macos|linux>.zip
 Unix file modes are preserved in the zip, so macOS bundles and the Linux standalone keep their executable bits.
@@ -12,31 +12,41 @@ import zipfile
 
 REPO = "https://github.com/huuba91/chiller"
 
-WINDOWS_INSTALL = """CHILLER {version} (Windows x64) - pre-alpha
-==========================================
+ABLETON = """ABLETON LIVE
+  Preferences > Plug-ins > enable "Use VST3 Plug-in System Folders" (and "Use Audio Units" on macOS),
+  then click "Rescan". Chiller appears under Plug-ins > Effects (look for "Chiller", manufacturer Neuroforge).
+  Drop it on a track. Use the Mix mode for tracks and buses, Master for the final bounce.
+  Sidechain key: pick a source track in the Audio From chooser of Chiller's sidechain section, then switch
+  "Sidechain key" on in the Explain view.
+"""
+
+WINDOWS_INSTALL = """CHILLER {version} (Windows x64) - alpha
+======================================
 
 VST3  (Ableton Live, Cubase, FL Studio, Studio One, Reaper, ...)
   Copy the folder "Chiller.vst3" to:  C:\\Program Files\\Common Files\\VST3\\
+  (needs administrator rights; the whole "Chiller.vst3" folder must be copied, not only the file inside it)
 
 CLAP  (Bitwig, Reaper, FL Studio, Studio One, ...)
   Copy the file "Chiller.clap" to:    C:\\Program Files\\Common Files\\CLAP\\
 
 Then rescan plug-ins in your DAW. Chiller appears as an effect.
 
+""" + ABLETON + """
 Standalone
   Run Chiller.exe (choose your audio device under Options).
 
-Foundation build: audio passes through unchanged (with latency); the resonance suppression itself
-arrives in v0.1. Roadmap: {repo}/blob/main/docs/PLAN.md
+Alpha: the suppression engine works, but expect rough edges. See docs/release-notes/v0.1.0-alpha.md
+Roadmap: {repo}/blob/main/docs/PLAN.md
 Bugs & feedback:    {repo}/issues
 
-The binaries are not code-signed; Windows SmartScreen may warn.
+The binaries are not code-signed; Windows SmartScreen may warn ("More info" > "Run anyway").
 Licensed under the GNU AGPLv3 (see LICENSE.txt). Source: {repo}
 Third-party licenses are in the "third-party-licenses" folder.
 """
 
-MACOS_INSTALL = """CHILLER {version} (macOS 10.15+, Apple Silicon + Intel) - pre-alpha
-====================================================================
+MACOS_INSTALL = """CHILLER {version} (macOS 10.15+, Apple Silicon + Intel) - alpha
+==============================================================
 
 EASIEST: one line in Terminal installs everything and avoids the macOS warnings:
 
@@ -45,7 +55,7 @@ EASIEST: one line in Terminal installs everything and avoids the macOS warnings:
 MANUAL INSTALL (from this zip)
   Copy each format to its folder (in Finder: Go > Go to Folder...):
     Chiller.vst3       ->  ~/Library/Audio/Plug-Ins/VST3/        (Ableton, Bitwig, Reaper, FL, Cubase, ...)
-    Chiller.component  ->  ~/Library/Audio/Plug-Ins/Components/  (Logic Pro, GarageBand)
+    Chiller.component  ->  ~/Library/Audio/Plug-Ins/Components/  (Logic Pro, GarageBand, Ableton via Audio Units)
     Chiller.clap       ->  ~/Library/Audio/Plug-Ins/CLAP/        (Bitwig, Reaper, ...)
     Chiller.app        ->  /Applications or ~/Applications       (standalone)
 
@@ -54,16 +64,17 @@ MANUAL INSTALL (from this zip)
 
     xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/*/Chiller.* ~/Applications/Chiller.app /Applications/Chiller.app 2>/dev/null; killall -9 AudioComponentRegistrar 2>/dev/null; true
 
-Foundation build: audio passes through unchanged (with latency); the resonance suppression itself
-arrives in v0.1. Roadmap: {repo}/blob/main/docs/PLAN.md
+""" + ABLETON + """
+Alpha: the suppression engine works, but expect rough edges. See docs/release-notes/v0.1.0-alpha.md
+Roadmap: {repo}/blob/main/docs/PLAN.md
 Bugs & feedback:    {repo}/issues
 
 Licensed under the GNU AGPLv3 (see LICENSE.txt). Source: {repo}
 Third-party licenses are in the "third-party-licenses" folder.
 """
 
-LINUX_INSTALL = """CHILLER {version} (Linux x86_64) - pre-alpha
-============================================
+LINUX_INSTALL = """CHILLER {version} (Linux x86_64) - alpha
+========================================
 
 Copy each format to your plug-in folder, then rescan plug-ins in your DAW:
   Chiller.vst3  ->  ~/.vst3/
@@ -71,8 +82,8 @@ Copy each format to your plug-in folder, then rescan plug-ins in your DAW:
   Chiller.lv2   ->  ~/.lv2/
   Chiller       ->  anywhere (standalone app: chmod +x Chiller)
 
-Foundation build: audio passes through unchanged (with latency); the resonance suppression itself
-arrives in v0.1. Roadmap: {repo}/blob/main/docs/PLAN.md
+Alpha: the suppression engine works, but expect rough edges. See docs/release-notes/v0.1.0-alpha.md
+Roadmap: {repo}/blob/main/docs/PLAN.md
 Bugs & feedback:    {repo}/issues
 
 Licensed under the GNU AGPLv3 (see LICENSE.txt). Source: {repo}
