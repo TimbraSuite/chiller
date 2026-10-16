@@ -176,6 +176,14 @@ void ChillerProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Midi
     const int total = buffer.getNumSamples();
     if (buffer.getNumChannels() < 2 || total == 0) return;   // stereo only (see isBusesLayoutSupported)
 
+    // transport state, so LEARN can wait for the host to start playing
+    {
+        int playing = -1;
+        if (auto* ph = getPlayHead())
+            if (const auto pos = ph->getPosition()) playing = pos->getIsPlaying() ? 1 : 0;
+        hostPlaying.store(playing, std::memory_order_relaxed);
+    }
+
     // The processor reports latency for the current mode; re-sync when the mode parameter changes.
     const auto wanted = modeFromRaw(getRaw(pid::mode));
     if (wanted != activeMode) applyMode(wanted);

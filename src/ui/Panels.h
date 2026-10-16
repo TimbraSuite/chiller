@@ -60,8 +60,13 @@ private:
     juce::Rectangle<int> logoArea, latencyArea, cpuArea;
     std::vector<int> separators;
 
-    bool learning = false;
-    juce::uint32 learnStart = 0;
+    enum class LearnState { Idle, Armed, Listening };
+    LearnState learnState = LearnState::Idle;
+    bool hostIsPlaying() const;
+    void beginListening();
+    void cancelLearn();
+    juce::uint32 learnLastTick = 0;
+    float learnHeardMs = 0.f;          // listening time; only counts while the host plays
     unsigned long long lastLearnFrame = 0;
     chiller::dsp::LearnAccumulator learnAcc;
 };

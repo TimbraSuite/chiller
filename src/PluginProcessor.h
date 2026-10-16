@@ -48,6 +48,7 @@ public:
     void readUi(chiller::dsp::UiFrame& f) { engine.readUi(f); }
     std::atomic<float> peakL { 0.f }, peakR { 0.f };    // output sample peaks (decaying)
     std::atomic<float> cpuLoad { 0.f };                 // fraction of the buffer time spent in processBlock
+    std::atomic<int> hostPlaying { -1 };                // transport: 1 playing, 0 stopped, -1 unknown (no play head, e.g. Standalone)
     double getLatencyMs() const { return currentSampleRate > 0.0 ? 1000.0 * getLatencySamples() / currentSampleRate : 0.0; }
     double currentSampleRate = 48000.0;
 
