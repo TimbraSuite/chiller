@@ -53,8 +53,8 @@ TopBar::TopBar(ChillerProcessor& p, UiState& s) : proc(p), st(s)
     undo.onClick = [this] { proc.undo(); };
     redo.onClick = [this] { proc.redo(); };
 
-    learn.setTooltip("Listen to 3 seconds of audio and set Threshold, Amount, Release, Max Cut, Range Low and Harmonic Protect for you (bass is left alone)");
-    learn.onClick = [this] { if (!learning) startLearn(); };
+    learn.setTooltip("Press, then play: listens to 3 seconds of playback (starts right away if the DAW is already playing) and sets Threshold, Amount, Release, Max Cut, Range Low and Harmonic Protect for you (bass is left alone)");
+    learn.onClick = [this] { if (learnState == LearnState::Idle) startLearn(); else cancelLearn(); };
 
     mode = std::make_unique<ParamCombo>(p, pid::mode);
     mode->setTooltip("Live (low latency): ~5 ms. Mix: ~21 ms. Master: ~85 ms, finest resolution.");
@@ -135,36 +135,63 @@ void TopBar::tick()
     redo.setEnabled(proc.canRedo());
     if (!preset.isPopupActive()) syncPresetCombo();
 
-    if (learning) {
-        const float u = (float) (juce::Time::getMillisecondCounter() - learnStart) / 3000.f;
-        st.learnProgress = juce::jlimit(0.f, 1.f, u);
+    if (learnState == LearnState::Armed && hostIsPlaying()) beginListening();
+    if (learnState == LearnState::Listening) {
+        const auto now = juce::Time::getMillisecondCounter();
+        const bool playing = hostIsPlaying();
+        if (playing) learnHeardMs += (float) (now - learnLastTick);   // paused while the transport is stopped
+        learnLastTick = now;
+        learn.setButtonText(playing ? "LISTENING" : "PAUSED");
+        st.learnProgress = juce::jlimit(0.f, 1.f, learnHeardMs / 3000.f);
         learn.progress = st.learnProgress;
         if (st.haveFrame && st.frame.frameCounter != lastLearnFrame) {
             lastLearnFrame = st.frame.frameCounter;
-            learnAcc.add(st.frame, proc.getReal(pid::threshold));
+            if (playing) learnAcc.add(st.frame, proc.getReal(pid::threshold));
         }
         learn.repaint();
-        if (u >= 1.f) finishLearn();
+        if (learnHeardMs >= 3000.f) finishLearn();
     }
+}
+
+bool TopBar::hostIsPlaying() const
+{
+    return proc.hostPlaying.load(std::memory_order_relaxed) != 0;   // unknown (no transport) counts as playing
 }
 
 void TopBar::startLearn()
 {
-    if (!st.haveFrame) { st.showToast("No audio yet. Play something through Chiller, then press LEARN"); return; }
-    learning = true;
-    learnStart = juce::Time::getMillisecondCounter();
-    lastLearnFrame = st.frame.frameCounter;
+    learnAcc.reset();
+    if (hostIsPlaying()) { beginListening(); return; }
+    learnState = LearnState::Armed;
+    learn.setButtonText("WAITING");
+    learn.progress = 0.f;
+    learn.repaint();
+    st.showToast("LEARN is waiting: start playback in your DAW (click LEARN again to cancel)");
+}
+
+void TopBar::beginListening()
+{
+    learnState = LearnState::Listening;
+    learnLastTick = juce::Time::getMillisecondCounter();
+    learnHeardMs = 0.f;
+    lastLearnFrame = st.haveFrame ? st.frame.frameCounter : 0;
     learnAcc.reset();
     learn.setButtonText("LISTENING");
     st.learnProgress = 0.f;
 }
 
-void TopBar::finishLearn()
+void TopBar::cancelLearn()
 {
-    learning = false;
+    learnState = LearnState::Idle;
     st.learnProgress = -1.f;
     learn.progress = -1.f;
     learn.setButtonText("LEARN");
+    learn.repaint();
+}
+
+void TopBar::finishLearn()
+{
+    cancelLearn();
     const auto r = learnAcc.finish(proc.getReal(pid::rangeLow), proc.getReal(pid::rangeHigh), proc.getReal(pid::release), proc.getReal(pid::maxCut),
                                     dsp::resolvedFromHz((dsp::Mode) juce::jlimit(0, 2, juce::roundToInt(proc.getReal(pid::mode))), st.frame.sampleRate),
                                     proc.getReal(pid::harmonicProtect) / 100.f);
