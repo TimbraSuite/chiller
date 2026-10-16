@@ -53,7 +53,7 @@ TopBar::TopBar(ChillerProcessor& p, UiState& s) : proc(p), st(s)
     undo.onClick = [this] { proc.undo(); };
     redo.onClick = [this] { proc.redo(); };
 
-    learn.setTooltip("Listen to 3 seconds of audio and set Threshold and Amount for you");
+    learn.setTooltip("Listen to 3 seconds of audio and set Threshold, Amount, Release, Max Cut and Range Low for you (bass is left alone)");
     learn.onClick = [this] { if (!learning) startLearn(); };
 
     mode = std::make_unique<ParamCombo>(p, pid::mode);
@@ -141,13 +141,7 @@ void TopBar::tick()
         learn.progress = st.learnProgress;
         if (st.haveFrame && st.frame.frameCounter != lastLearnFrame) {
             lastLearnFrame = st.frame.frameCounter;
-            const float thr = proc.getReal(pid::threshold);
-            for (int i = 0; i < dsp::kUiPoints; ++i) {
-                const float ex = st.frame.inDb[i] - (st.frame.expDb[i] - thr);
-                learnExcess[(size_t) i] += std::max(0.f, ex);
-                learnLevel[(size_t) i] += st.frame.inDb[i];
-            }
-            ++learnSamples;
+            learnAcc.add(st.frame, proc.getReal(pid::threshold));
         }
         learn.repaint();
         if (u >= 1.f) finishLearn();
@@ -159,10 +153,8 @@ void TopBar::startLearn()
     if (!st.haveFrame) { st.showToast("No audio yet. Play something through Chiller, then press LEARN"); return; }
     learning = true;
     learnStart = juce::Time::getMillisecondCounter();
-    learnSamples = 0;
     lastLearnFrame = st.frame.frameCounter;
-    learnExcess.assign(dsp::kUiPoints, 0.f);
-    learnLevel.assign(dsp::kUiPoints, 0.f);
+    learnAcc.reset();
     learn.setButtonText("LISTENING");
     st.learnProgress = 0.f;
 }
@@ -173,23 +165,18 @@ void TopBar::finishLearn()
     st.learnProgress = -1.f;
     learn.progress = -1.f;
     learn.setButtonText("LEARN");
-    // mean excess above the expected curve per display point, restricted to the active range and to points with signal
-    const float lo = proc.getReal(pid::rangeLow), hi = proc.getReal(pid::rangeHigh);
-    std::vector<float> ex;
-    for (int i = 0; i < dsp::kUiPoints; ++i) {
-        const float hz = dsp::uiPointHz(i);
-        if (hz < lo || hz > hi || learnSamples == 0) continue;
-        if (learnLevel[(size_t) i] / (float) learnSamples < -100.f) continue;
-        ex.push_back(learnExcess[(size_t) i] / (float) learnSamples);
-    }
-    if (ex.size() < 20) { st.showToast("Nothing heard. Play audio through Chiller and try again"); return; }
-    std::sort(ex.begin(), ex.end(), std::greater<float>());
-    const float p = ex[std::min(ex.size() - 1, (size_t) std::ceil(0.06 * (double) ex.size()))];   // top ~6 % of the spectrum
-    const float thr = juce::jlimit(4.f, 16.f, p + 1.f);
-    proc.setParamReal(pid::threshold, thr);
-    proc.setParamReal(pid::amount, 60.f);
+    const auto r = learnAcc.finish(proc.getReal(pid::rangeLow), proc.getReal(pid::rangeHigh), proc.getReal(pid::release), proc.getReal(pid::maxCut),
+                                    dsp::resolvedFromHz((dsp::Mode) juce::jlimit(0, 2, juce::roundToInt(proc.getReal(pid::mode))), st.frame.sampleRate));
+    if (!r.valid) { st.showToast("Nothing heard. Play audio through Chiller and try again"); return; }
+    proc.setParamReal(pid::threshold, r.threshold);
+    proc.setParamReal(pid::amount, r.amount * 100.f);
+    proc.setParamReal(pid::release, r.release);
+    proc.setParamReal(pid::maxCut, r.maxCut);
+    proc.setParamReal(pid::rangeLow, r.rangeLow);
     proc.historyCommit();
-    st.showToast("Learned: Threshold " + juce::String(thr, 1) + " dB, Amount 60 %");
+    st.showToast("Learned: Threshold " + juce::String(r.threshold, 1) + " dB, Amount " + juce::String(juce::roundToInt(r.amount * 100.f))
+                 + " %, Release " + juce::String(juce::roundToInt(r.release)) + " ms, Max Cut " + juce::String(r.maxCut, 1)
+                 + " dB, Range Low " + juce::String(juce::roundToInt(r.rangeLow)) + " Hz (bass is left alone)");
 }
 
 //==============================================================================================

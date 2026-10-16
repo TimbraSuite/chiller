@@ -32,6 +32,28 @@ struct Test {
     std::vector<std::pair<double, std::string>> marks;   // frequencies to report
 };
 
+// "mix" signal (kick + bassline + harsh synth + pink noise): LEARN-like settings, low-end bounce per mode.
+static void mixReport(double seconds)
+{
+    const double sr = 48000.0;
+    const auto x = mixSignal((int) (seconds * sr), sr);
+    std::printf("Mix test signal, %.0f s. Bounce = gain reduction averaged over 30-200 Hz over time; level = output-input in 30-200 Hz (2048-sample windows)\n", seconds);
+    std::printf("%-7s %-14s %7s %7s %7s | %7s %7s | %8s %8s %8s | LEARN\n", "mode", "settings", "GRstd", "GRp2p", "GRmean", "lvlStd", "lvlMean", "2.5k", "4k", "6k");
+    for (int m = 0; m < 3; ++m) {
+        const char* names[] = { "Live", "Mix", "Master" };
+        SuppressorParams def;
+        const auto lr = emulateLearn(x, sr, (Mode) m, def);
+        for (int k = 0; k < 2; ++k) {
+            const auto p = k == 0 ? def : withLearn(def, lr);
+            const auto b = measureBounce(x, sr, (Mode) m, p);
+            std::printf("%-7s %-14s %7.2f %7.2f %7.2f | %7.2f %7.2f | %+8.2f %+8.2f %+8.2f", names[m], k == 0 ? "defaults" : "LEARN", b.grStd, b.grP2P, b.grMean,
+                        b.lvlStd, b.lvlMean, b.res[0], b.res[1], b.res[2]);
+            if (k == 1) std::printf(" | thr %.1f amt %.0f%% rel %.0f maxCut %.0f lo %.0f", lr.threshold, lr.amount * 100, lr.release, lr.maxCut, lr.rangeLow);
+            std::printf("\n");
+        }
+    }
+}
+
 static void bench()
 {
     std::printf("CPU benchmark: processing time per second of stereo audio (single thread, 512-sample blocks)\n");
@@ -64,6 +86,7 @@ static void bench()
 int main(int argc, char** argv)
 {
     for (int i = 1; i < argc; ++i) if (!std::strcmp(argv[i], "--bench")) { bench(); return 0; }
+    for (int i = 1; i < argc; ++i) if (!std::strcmp(argv[i], "--mix")) { mixReport(argc > i + 1 ? std::atof(argv[i + 1]) : 12.0); return 0; }
     std::string wavDir, modeName = "mix";
     float amount = 100.f, threshold = 4.f, seconds = 6.f;
     for (int i = 1; i < argc; ++i) {

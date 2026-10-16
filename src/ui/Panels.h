@@ -1,6 +1,7 @@
 #pragma once
 #include "Controls.h"
 #include "Displays.h"
+#include "dsp/Learn.h"
 #include <functional>
 #include <memory>
 #include <vector>
@@ -62,8 +63,7 @@ private:
     bool learning = false;
     juce::uint32 learnStart = 0;
     unsigned long long lastLearnFrame = 0;
-    int learnSamples = 0;
-    std::vector<float> learnExcess, learnLevel;
+    chiller::dsp::LearnAccumulator learnAcc;
 };
 
 std::unique_ptr<Panel> makeDetectPanel(ChillerProcessor&);

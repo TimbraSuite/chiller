@@ -1,5 +1,6 @@
 #pragma once
 // Processing mode: trades latency for resolution. Order matches the "mode" parameter's choices.
+#include <algorithm>
 #include <cmath>
 
 namespace chiller::dsp {
@@ -17,6 +18,17 @@ inline int fftSizeFor(Mode m, double sampleRate)
     while ((double) n * 1.41421356 < ideal && n < (1 << 18)) n <<= 1;
     return n;
 }
+
+// Lowest frequency this STFT size can reliably separate (about kResolveBins bins). Below it a bass note or kick
+// cannot be told from a resonance, so the detector fades out over the octave beneath it (see Suppressor) and
+// LEARN does not listen there. 48 kHz: Live 1.1 kHz, Mix 281 Hz, Master 150 Hz (floor; 6 bins would be 70 Hz).
+constexpr float kResolveBins = 6.f;
+constexpr float kBassFloorHz = 150.f;   // even a very fine STFT keeps bass notes (tonal, 30+ dB above their surroundings) out of detection
+inline float resolvedFromHz(int fftSize, double sampleRate)
+{
+    return std::max(kBassFloorHz, kResolveBins * (float) (sampleRate / (double) fftSize));
+}
+inline float resolvedFromHz(Mode m, double sampleRate) { return resolvedFromHz(fftSizeFor(m, sampleRate), sampleRate); }
 
 inline int latencyForMode(Mode m, double sampleRate) { return fftSizeFor(m, sampleRate); }
 

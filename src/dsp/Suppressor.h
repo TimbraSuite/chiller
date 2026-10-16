@@ -13,7 +13,7 @@ struct SuppressorParams {
     float amount = 0.5f;          // 0..1
     float focusOct = 1.f / 6.f;   // width of the expected-curve window, 1/24 .. 1 octave
     float maxCutDb = 12.f;        // 0..30
-    float rangeLowHz = 40.f, rangeHighHz = 18000.f;
+    float rangeLowHz = 100.f, rangeHighHz = 18000.f;
     float attackMs = 10.f, releaseMs = 120.f;
     float speedTilt = 0.f;        // -1..1, + = faster highs
     float transientPass = 0.f;    // 0..1
@@ -65,7 +65,7 @@ private:
     const float* detOwn[2] = { nullptr, nullptr };
     Pipe pipes[3];
     std::vector<double> ps;
-    std::vector<float> clipv, M, rangeW, harmFactor, hw, aCoef, rCoef, gA, gB;
+    std::vector<float> clipv, M, rangeW, capW, harmFactor, hw, aCoef, rCoef, gA, gB;
     std::vector<int> lo, hi, loW, hiW;
     int budgetLo = 0, budgetHi = 0, pitchBins = 0, fluxLo = 0;
     // pitch

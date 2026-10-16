@@ -394,3 +394,62 @@ CH_TEST(factory_presets_are_valid)
         }
     }
 }
+
+// ---- low-end guard: kick + bass + harsh synth ("mix" signal), LEARN-like settings ---------------------------
+CH_TEST(learn_leaves_bass_alone_and_is_gentle)
+{
+    const double sr = 48000.0;
+    const auto x = mixSignal((int) (6 * sr), sr);
+    for (int m = 0; m < 3; ++m) {
+        SuppressorParams cur;
+        cur.rangeLowHz = 40.f;   // an older project: LEARN must still lift it
+        const auto r = emulateLearn(x, sr, (Mode) m, cur);
+        CH_INFO("mode %d: thr %.1f amount %.2f release %.0f maxCut %.0f rangeLow %.0f\n", m, r.threshold, r.amount, r.release, r.maxCut, r.rangeLow);
+        CH_CHECK(r.valid);
+        CH_CHECK(r.rangeLow >= 120.f);
+        CH_CHECK(r.release >= 150.f);
+        CH_CHECK_NEAR(r.amount, 0.5, 1e-6);
+        CH_CHECK(r.maxCut <= 9.f);
+        CH_CHECK(r.threshold >= 4.f && r.threshold <= 16.f);
+        // Mix and Master see the harsh resonances well above the kick/bass excess, so the threshold stays moderate
+        if (m > 0) CH_CHECK(r.threshold < 10.f);
+    }
+}
+
+CH_TEST(low_end_does_not_pump_but_resonances_are_still_cut)
+{
+    const double sr = 48000.0;
+    const auto x = mixSignal((int) (10 * sr), sr);
+    for (int m = 0; m < 3; ++m) {
+        SuppressorParams def;
+        const auto p = withLearn(def, emulateLearn(x, sr, (Mode) m, def));
+        const auto b = measureBounce(x, sr, (Mode) m, p);
+        CH_INFO("mode %d: GR 30-200 Hz std %.2f p2p %.2f dB, level std %.2f dB; resonances %.2f / %.2f / %.2f dB\n", m, b.grStd, b.grP2P,
+                b.lvlStd, b.res[0], b.res[1], b.res[2]);
+        CH_CHECK(b.grStd < 0.5);
+        CH_CHECK(b.grP2P < 1.5);
+        CH_CHECK(b.lvlStd < 1.0);
+        for (double r : b.res) CH_CHECK(r < (m == 0 ? -0.8 : -3.0));   // Live has 187 Hz bins: a smaller, but real, cut
+    }
+}
+
+CH_TEST(low_frequency_tone_is_not_a_resonance_in_mix_mode)
+{
+    // A steady 60 Hz tone 30 dB over the noise floor is a bass note, not a resonance, at 47 Hz per bin.
+    const double sr = 48000.0;
+    const int total = (int) (4 * sr);
+    auto x = pinkNoise(total, 0.02f, 3);
+    addSine(x, sr, 60.0, 0.2f);
+    for (int m = 0; m < 2; ++m) {   // Live and Mix
+        Engine e;
+        e.prepare(sr, (Mode) m);
+        SuppressorParams p;
+        p.amount = 1.f; p.thresholdDb = 3.f; p.maxCutDb = 30.f; p.budgetDb = 12.f; p.rangeLowHz = 20.f;
+        e.setParams(p);
+        auto l = x, r = x;
+        run(e, l, r);
+        const double a = attenuationDb(x, l, e.latencySamples(), sr, 55.0, 65.0);
+        CH_INFO("mode %d: 60 Hz tone %.2f dB\n", m, a);
+        CH_CHECK(a > -0.5);
+    }
+}

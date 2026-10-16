@@ -29,7 +29,7 @@ std::vector<ParamDef> buildDefs()
     set(amount, "amount", "Amount", 0.f, 100.f, 50.f, Curve::Lin, "%");
     set(focus, "focus", "Focus", 1.f / 24.f, 1.f, 1.f / 6.f, Curve::Log, "oct");
     set(maxCut, "max_cut", "Max Cut", 0.f, 30.f, 12.f, Curve::Lin, "dB");
-    set(rangeLow, "range_low", "Range Low", 20.f, 20000.f, 40.f, Curve::Log, "Hz");
+    set(rangeLow, "range_low", "Range Low", 20.f, 20000.f, 100.f, Curve::Log, "Hz");
     set(rangeHigh, "range_high", "Range High", 20.f, 20000.f, 18000.f, Curve::Log, "Hz");
     // ---- speed ----
     set(attack, "attack", "Attack", 1.f, 100.f, 10.f, Curve::Log, "ms");

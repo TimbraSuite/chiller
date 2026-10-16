@@ -42,7 +42,7 @@ CH_TEST(params_planned_values)
     CH_CHECK_NEAR(d(pid::attack).def, 10.0, 1e-6);
     CH_CHECK_NEAR(d(pid::release).def, 120.0, 1e-6);
     CH_CHECK_NEAR(d(pid::maxCut).def, 12.0, 1e-6);
-    CH_CHECK_NEAR(d(pid::rangeLow).def, 40.0, 1e-6);
+    CH_CHECK_NEAR(d(pid::rangeLow).def, 100.0, 1e-6);
     CH_CHECK_NEAR(d(pid::rangeHigh).def, 18000.0, 1e-6);
     CH_CHECK_NEAR(d(pid::mix).def, 100.0, 1e-6);
     CH_CHECK_NEAR(d(pid::trim).min, -24.0, 1e-6);

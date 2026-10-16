@@ -1,4 +1,5 @@
 #include "Suppressor.h"
+#include "Mode.h"
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -18,6 +19,12 @@ constexpr float kDetectSmooth = 0.5f;   // per-frame weight of the new spectrum 
 constexpr float kClipDb = 4.f;          // robust expected curve: peaks are clipped to (mean + this) between passes
 constexpr float kPitchLo = 60.f, kPitchHi = 1000.f, kPitchStepOct = 1.f / 150.f;
 constexpr int kPitchHarmonics = 6;
+// Low-end guard. Below ~kResolveBins bins a bass note or kick cannot be told apart from a resonance, so the
+// detection weight fades to 0 over the octave below that frequency. Time constants also grow towards the lows
+// (x sqrt(1000 Hz / f), at most x kLowSlowMax) so bass is never cut and released at the speed of the highs.
+constexpr float kLowSlowMax = 4.f, kLowSlowAtkMax = 8.f;
+// Low-end cap: below ~150 Hz at most this fraction of Max Cut is ever applied, rising to the full Max Cut at 600 Hz.
+constexpr float kLowCutFraction = 0.35f, kLowCapLoHz = 150.f, kLowCapHiHz = 600.f;
 } // namespace
 
 Suppressor::Suppressor(double sampleRate, int fftSize, TripleBuffer<UiFrame>* uiBuf)
@@ -33,9 +40,11 @@ Suppressor::Suppressor(double sampleRate, int fftSize, TripleBuffer<UiFrame>* ui
         window[(size_t) i] = (float) (0.5 - 0.5 * std::cos(2.0 * std::numbers::pi * (double) i / (double) n));
     for (auto* v : { &inA, &inB, &kA, &kB, &outA, &outB, &zr, &zi }) v->assign((size_t) n, 0.f);
     for (auto* v : { &aRe, &aIm, &bRe, &bIm, &pA, &pB, &kpA, &kpB, &tRe0, &tIm0, &tRe1, &tIm1, &dbMain, &dbKey, &dbLin,
-                     &dbOwn[0], &dbOwn[1], &clipv, &M, &rangeW, &harmFactor, &hw, &aCoef, &rCoef, &gA, &gB })
+                     &dbOwn[0], &dbOwn[1], &clipv, &capW, &M, &rangeW, &harmFactor, &hw, &aCoef, &rCoef, &gA, &gB })
         v->assign((size_t) nb, 0.f);
     std::fill(harmFactor.begin(), harmFactor.end(), 1.f);
+    for (int k = 0; k < nb; ++k)
+        capW[(size_t) k] = kLowCutFraction + (1.f - kLowCutFraction) * smoothstep(kLowCapLoHz, kLowCapHiHz, (float) k * binHz);
     ps.assign((size_t) nb + 1, 0.0);
     lo.assign((size_t) nb, 0); hi.assign((size_t) nb, 0); loW.assign((size_t) nb, 0); hiW.assign((size_t) nb, 0);
     for (auto& p : pipes) {
@@ -124,7 +133,9 @@ void Suppressor::updateRange()
         const float f = std::max((float) k, 0.25f) * binHz;
         const float a = fl / f, b = f / fh;
         const float a2 = a * a, b2 = b * b;
-        rangeW[(size_t) k] = 1.f / (1.f + a2 * a2) / (1.f + b2 * b2);   // 2nd-order-ish rolloff on each side
+        const float fRes = resolvedFromHz(n, sr);                     // lowest frequency this STFT size can separate
+        rangeW[(size_t) k] = 1.f / (1.f + a2 * a2) / (1.f + b2 * b2)  // 2nd-order-ish rolloff on each side
+                             * smoothstep(0.5f * fRes, fRes, (float) k * binHz);
     }
 }
 
@@ -132,9 +143,11 @@ void Suppressor::updateSpeed()
 {
     for (int k = 0; k < nb; ++k) {
         const float f = std::max((float) k, 0.5f) * binHz;
-        const float tf = std::clamp(std::exp2(-P.speedTilt * std::log2(f / 1000.f) / 3.f), 0.2f, 5.f);
-        aCoef[(size_t) k] = 1.f - std::exp(-hopMs / std::max(0.05f, P.attackMs * tf));
-        rCoef[(size_t) k] = 1.f - std::exp(-hopMs / std::max(0.05f, P.releaseMs * tf));
+        const float tilt = std::clamp(std::exp2(-P.speedTilt * std::log2(f / 1000.f) / 3.f), 0.2f, 5.f);
+        const float lowSlow = std::clamp(std::sqrt(1000.f / f), 1.f, kLowSlowMax);
+        const float lowSlowAtk = std::clamp(1000.f / f, 1.f, kLowSlowAtkMax);     // attack slows faster: short bass notes are not "resonances"
+        aCoef[(size_t) k] = 1.f - std::exp(-hopMs / std::max(0.05f, P.attackMs * tilt * lowSlowAtk));
+        rCoef[(size_t) k] = 1.f - std::exp(-hopMs / std::max(0.05f, P.releaseMs * tilt * lowSlow));
     }
 }
 
@@ -344,7 +357,7 @@ void Suppressor::runPipe(Pipe& p, const float* Lraw, const float* harm)
         if (ex > 0.f) {
             g = amt * ex * rangeW[(size_t) k] * transFactor;
             if (harm) g *= harm[k];
-            g = std::min(g, mc);
+            g = std::min(g, mc * capW[(size_t) k]);
         }
         p.Gt[(size_t) k] = g;
     }
