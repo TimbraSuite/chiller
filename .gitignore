@@ -1,0 +1,8 @@
+build/
+build-*/
+libs/
+renders/
+*.user
+.vs/
+__pycache__/
+dist/

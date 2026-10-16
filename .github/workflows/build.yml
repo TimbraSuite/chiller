@@ -1,0 +1,148 @@
+# Builds Chiller for Windows, macOS and Linux on every push, runs the tests and plugin validators,
+# and on a version tag (v*) publishes a GitHub pre-release with the zips attached.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  JUCE_TAG: 8.0.4
+  CLAP_JUCE_EXT_COMMIT: 7adee3a1bd4684d4caa5601100e364abccff4b4d
+  CLAP_VALIDATOR_REV: b2f1d9b7
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: windows
+          - os: macos-14
+            platform: macos
+          - os: ubuntu-24.04
+            platform: linux
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Ninja (macOS)
+        if: matrix.platform == 'macos'
+        run: command -v ninja || brew install ninja
+
+      - name: Install build dependencies (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build xvfb \
+            libasound2-dev libjack-jackd2-dev libfreetype-dev libfontconfig1-dev libx11-dev \
+            libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev \
+            libgl1-mesa-dev libcurl4-openssl-dev
+
+      - name: Version
+        id: ver
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF#refs/tags/v}"; v="${v%%-*}";
+          else v=$(sed -nE 's/^project\(Chiller VERSION ([0-9.]+).*/\1/p' CMakeLists.txt); fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"; echo "Version $v"
+
+      - name: Fetch JUCE and clap-juce-extensions
+        run: |
+          git clone --depth 1 --branch "$JUCE_TAG" https://github.com/juce-framework/JUCE.git libs/JUCE
+          git clone https://github.com/free-audio/clap-juce-extensions.git libs/clap-juce-extensions
+          git -C libs/clap-juce-extensions checkout "$CLAP_JUCE_EXT_COMMIT"
+          git -C libs/clap-juce-extensions submodule update --init --recursive
+
+      - name: Configure (Windows)
+        if: matrix.platform == 'windows'
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Configure (macOS universal, Linux)
+        if: matrix.platform != 'windows'
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: |
+          targets="Chiller_VST3 Chiller_CLAP Chiller_Standalone chiller_tests"
+          if [[ "${{ matrix.platform }}" == macos ]]; then targets="$targets Chiller_AU"; fi
+          if [[ "${{ matrix.platform }}" == linux ]]; then targets="$targets Chiller_LV2"; fi
+          cmake --build build --config Release --parallel 4 --target $targets
+
+      - name: Unit tests
+        run: |
+          if [[ -f build/Release/chiller_tests.exe ]]; then build/Release/chiller_tests.exe; else build/chiller_tests; fi
+
+      - name: Ad-hoc sign (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          A=build/Chiller_artefacts/Release
+          for b in "$A/VST3/Chiller.vst3" "$A/AU/Chiller.component" "$A/CLAP/Chiller.clap" "$A/Standalone/Chiller.app"; do
+            codesign --force --deep --sign - "$b"
+            codesign --verify --verbose "$b"
+          done
+          lipo -info "$A/VST3/Chiller.vst3/Contents/MacOS/Chiller"
+
+      - name: Validate Audio Unit (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R build/Chiller_artefacts/Release/AU/Chiller.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          sleep 2
+          auval -a | grep -i chiller || true
+          auval -strict -v aufx Chl1 Nfrg
+
+      - name: Validate CLAP
+        run: |
+          cargo install --git https://github.com/free-audio/clap-validator --rev "$CLAP_VALIDATOR_REV" --locked --root "$RUNNER_TEMP/clapval"
+          "$RUNNER_TEMP/clapval/bin/clap-validator" validate --only-failed build/Chiller_artefacts/Release/CLAP/Chiller.clap
+
+      - name: Validate VST3 with pluginval (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/pluginval.zip" https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Linux.zip
+          unzip -q "$RUNNER_TEMP/pluginval.zip" -d "$RUNNER_TEMP/pluginval"
+          xvfb-run -a "$RUNNER_TEMP/pluginval/pluginval" --strictness-level 5 --validate-in-process \
+            --output-dir "$RUNNER_TEMP" build/Chiller_artefacts/Release/VST3/Chiller.vst3
+
+      - name: Package
+        run: python tools/package.py --platform ${{ matrix.platform }} --version ${{ steps.ver.outputs.version }} --artefacts build/Chiller_artefacts/Release --out dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chiller-${{ matrix.platform }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          notes="docs/release-notes/$tag.md"
+          [[ -f "$notes" ]] || notes=/dev/null
+          gh release create "$tag" dist/*.zip --title "Chiller $tag" --notes-file "$notes" --prerelease
