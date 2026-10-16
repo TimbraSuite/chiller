@@ -474,10 +474,97 @@ CH_TEST(bass_and_fundamentals_up_to_250hz_do_not_bounce)
         }
     }
     for (int m = 1; m < 3; ++m) {
-        SuppressorParams def;                         // defaults: the worst case (no LEARN, no Harmonic Protect)
+        SuppressorParams def;                         // defaults: the worst case (no LEARN)
         const auto b = measureBounce(x, sr, (Mode) m, def, 1.0);
         CH_INFO("mode %d: 30-200 Hz level change mean %.2f std %.2f dB\n", m, b.lvlMean, b.lvlStd);
         CH_CHECK(b.lvlStd < 0.5);
         CH_CHECK(b.lvlMean > -0.6);
     }
+}
+
+// ---- regression: clean tonal sources must not be dulled, a fixed resonance on top of them must still be cut ----
+// Found with real recordings (acoustic guitar, strings, trumpet, piano lost 3-8 dB at 4-8 kHz with default settings): the sparse upper harmonics of
+// a pitched source stand far above the floor between them and were treated like resonances. A sawtooth-like series (1/n roll-off) over a quiet noise
+// floor, with the pitch changing every 0.5 s, stands for them. The optional resonance is a steady sine that does not follow the pitch.
+static std::vector<float> harmonicMelody(int n, double sr, float resonanceAmp, double resonanceHz = 3300.0)
+{
+    auto x = pinkNoise(n, 0.0005f, 31);                       // quiet noise floor (about -66 dB)
+    const double f0s[] = { 196.0, 220.0, 246.9, 261.6, 293.7, 329.6, 349.2, 392.0, 261.6, 220.0 };
+    const int note = (int) (0.5 * sr);
+    for (int s = 0; s * note < n; ++s) {
+        const double f0 = f0s[(size_t) s % 10];
+        for (int i = 0; i < note && s * note + i < n; ++i) {
+            const double t = (double) i / sr;
+            const float env = (float) std::min(1.0, t / 0.008) * (float) std::min(1.0, (note - i) / (0.02 * sr)) * (float) std::exp(-0.5 * t);
+            float v = 0.f;
+            for (int h = 1; f0 * h < 0.45 * sr; ++h)
+                v += 0.12f / (float) h * (float) std::sin(2.0 * std::numbers::pi * f0 * h * (double) (s * note + i) / sr + 0.7 * h);
+            x[(size_t) (s * note + i)] += env * v;
+        }
+    }
+    if (resonanceAmp > 0.f) addSine(x, sr, resonanceHz, resonanceAmp);
+    return x;
+}
+
+CH_TEST(harmonic_tone_is_not_dulled_with_default_settings)
+{
+    const double sr = 48000.0;
+    const int n = (int) (8 * sr);
+    const auto x = harmonicMelody(n, sr, 0.f);
+    for (int m = 1; m < 3; ++m) {
+        Engine e;
+        e.prepare(sr, (Mode) m);
+        SuppressorParams p;                                         // defaults (what Init gives)
+        e.setParams(p);
+        auto l = x, r = x;
+        run(e, l, r);
+        const int lat = e.latencySamples();
+        double worst = 0.0;
+        for (auto [f1, f2] : { std::pair<double, double> { 2000.0, 4000.0 }, { 4000.0, 8000.0 }, { 8000.0, 16000.0 } }) {
+            const double d = bandDbAvg(l, (int) (1.0 * sr), 4096, 24, sr, f1, f2) - bandDbAvg(x, (int) (1.0 * sr) - lat, 4096, 24, sr, f1, f2);
+            CH_INFO("mode %d: %.0f-%.0f Hz changed by %.2f dB\n", m, f1, f2, d);
+            worst = std::min(worst, d);
+        }
+        CH_CHECK(worst > -1.0);
+    }
+}
+
+CH_TEST(harmonic_tone_with_fixed_resonance_still_gets_the_resonance_cut)
+{
+    const double sr = 48000.0;
+    const int n = (int) (8 * sr);
+    const auto x = harmonicMelody(n, sr, 0.05f);                    // 3.3 kHz, about 14 dB above the neighbouring harmonics (which are 0.12 / n)
+    for (int m = 1; m < 3; ++m) {
+        Engine e;
+        e.prepare(sr, (Mode) m);
+        SuppressorParams p;
+        e.setParams(p);
+        auto l = x, r = x;
+        run(e, l, r);
+        const int lat = e.latencySamples();
+        const double atRes = bandDbAvg(l, (int) (2.0 * sr), 4096, 16, sr, 3250.0, 3350.0) - bandDbAvg(x, (int) (2.0 * sr) - lat, 4096, 16, sr, 3250.0, 3350.0);
+        const double above = bandDbAvg(l, (int) (2.0 * sr), 4096, 16, sr, 4000.0, 8000.0) - bandDbAvg(x, (int) (2.0 * sr) - lat, 4096, 16, sr, 4000.0, 8000.0);
+        CH_INFO("mode %d: resonance %.2f dB, 4-8 kHz %.2f dB\n", m, atRes, above);
+        CH_CHECK(atRes < -3.0);
+        CH_CHECK(above > -1.0);
+    }
+}
+
+CH_TEST(harmonic_protect_zero_restores_the_classic_detector)
+{
+    // Harmonic Protect 0 switches the whole tonal protection off (for material whose harmonics are the problem): the harmonic tone is cut again.
+    const double sr = 48000.0;
+    const int n = (int) (8 * sr);
+    const auto x = harmonicMelody(n, sr, 0.f);
+    Engine e;
+    e.prepare(sr, Mode::Mix);
+    SuppressorParams p;
+    p.harmonicProtect = 0.f;
+    e.setParams(p);
+    auto l = x, r = x;
+    run(e, l, r);
+    const int lat = e.latencySamples();
+    const double d = bandDbAvg(l, (int) (1.0 * sr), 4096, 24, sr, 4000.0, 8000.0) - bandDbAvg(x, (int) (1.0 * sr) - lat, 4096, 24, sr, 4000.0, 8000.0);
+    CH_INFO("protect 0: 4-8 kHz changed by %.2f dB\n", d);
+    CH_CHECK(d < -2.0);
 }

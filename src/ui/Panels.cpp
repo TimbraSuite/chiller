@@ -53,7 +53,7 @@ TopBar::TopBar(ChillerProcessor& p, UiState& s) : proc(p), st(s)
     undo.onClick = [this] { proc.undo(); };
     redo.onClick = [this] { proc.redo(); };
 
-    learn.setTooltip("Listen to 3 seconds of audio and set Threshold, Amount, Release, Max Cut and Range Low for you (bass is left alone)");
+    learn.setTooltip("Listen to 3 seconds of audio and set Threshold, Amount, Release, Max Cut, Range Low and Harmonic Protect for you (bass is left alone)");
     learn.onClick = [this] { if (!learning) startLearn(); };
 
     mode = std::make_unique<ParamCombo>(p, pid::mode);
@@ -166,17 +166,19 @@ void TopBar::finishLearn()
     learn.progress = -1.f;
     learn.setButtonText("LEARN");
     const auto r = learnAcc.finish(proc.getReal(pid::rangeLow), proc.getReal(pid::rangeHigh), proc.getReal(pid::release), proc.getReal(pid::maxCut),
-                                    dsp::resolvedFromHz((dsp::Mode) juce::jlimit(0, 2, juce::roundToInt(proc.getReal(pid::mode))), st.frame.sampleRate));
+                                    dsp::resolvedFromHz((dsp::Mode) juce::jlimit(0, 2, juce::roundToInt(proc.getReal(pid::mode))), st.frame.sampleRate),
+                                    proc.getReal(pid::harmonicProtect) / 100.f);
     if (!r.valid) { st.showToast("Nothing heard. Play audio through Chiller and try again"); return; }
     proc.setParamReal(pid::threshold, r.threshold);
     proc.setParamReal(pid::amount, r.amount * 100.f);
     proc.setParamReal(pid::release, r.release);
     proc.setParamReal(pid::maxCut, r.maxCut);
     proc.setParamReal(pid::rangeLow, r.rangeLow);
+    proc.setParamReal(pid::harmonicProtect, r.harmonicProtect * 100.f);
     proc.historyCommit();
     st.showToast("Learned: Threshold " + juce::String(r.threshold, 1) + " dB, Amount " + juce::String(juce::roundToInt(r.amount * 100.f))
                  + " %, Release " + juce::String(juce::roundToInt(r.release)) + " ms, Max Cut " + juce::String(r.maxCut, 1)
-                 + " dB, Range Low " + juce::String(juce::roundToInt(r.rangeLow)) + " Hz (bass is left alone)");
+                 + " dB, Range Low " + juce::String(juce::roundToInt(r.rangeLow)) + " Hz, Harmonic Protect " + juce::String(juce::roundToInt(r.harmonicProtect * 100.f)) + " % (bass is left alone)");
 }
 
 //==============================================================================================

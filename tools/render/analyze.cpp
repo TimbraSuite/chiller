@@ -287,10 +287,10 @@ int main(int argc, char** argv)
             e.readUi(f);
             if (f.frameCounter != last) { last = f.frameCounter; acc.add(f, def.thresholdDb); }
         }
-        const auto lr = acc.finish(def.rangeLowHz, def.rangeHighHz, def.releaseMs, def.maxCutDb, resolvedFromHz(mode, sr));
+        const auto lr = acc.finish(def.rangeLowHz, def.rangeHighHz, def.releaseMs, def.maxCutDb, resolvedFromHz(mode, sr), def.harmonicProtect);
         p = chtest::withLearn(def, lr);
         char b[200];
-        std::snprintf(b, sizeof b, "thr %.1f amt %.0f rel %.0f maxCut %.0f lo %.0f%s", lr.threshold, lr.amount * 100, lr.release, lr.maxCut, lr.rangeLow, lr.valid ? "" : " (invalid)");
+        std::snprintf(b, sizeof b, "thr %.1f amt %.0f rel %.0f maxCut %.0f lo %.0f hp %.0f pitched %.2f%s", lr.threshold, lr.amount * 100, lr.release, lr.maxCut, lr.rangeLow, lr.harmonicProtect * 100, lr.pitchShare, lr.valid ? "" : " (invalid)");
         learnInfo = b;
     } else {
         int idx = -1;

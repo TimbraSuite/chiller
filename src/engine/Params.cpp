@@ -37,7 +37,7 @@ std::vector<ParamDef> buildDefs()
     set(speedTilt, "speed_tilt", "Speed Tilt", -1.f, 1.f, 0.f);
     // ---- protect ----
     set(transientPass, "transient_pass", "Transient Pass", 0.f, 100.f, 0.f, Curve::Lin, "%");
-    set(harmonicProtect, "harmonic_protect", "Harmonic Protect", 0.f, 100.f, 0.f, Curve::Lin, "%");
+    set(harmonicProtect, "harmonic_protect", "Harmonic Protect", 0.f, 100.f, 30.f, Curve::Lin, "%");
     set(budget, "budget", "Budget", 0.f, 12.f, 6.f, Curve::Lin, "dB");
     // ---- stereo ----
     choice(stereoMode, "stereo_mode", "Stereo Mode", { "L/R", "M/S" }, 0);

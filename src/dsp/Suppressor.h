@@ -17,7 +17,7 @@ struct SuppressorParams {
     float attackMs = 10.f, releaseMs = 120.f;
     float speedTilt = 0.f;        // -1..1, + = faster highs
     float transientPass = 0.f;    // 0..1
-    float harmonicProtect = 0.f;  // 0..1
+    float harmonicProtect = 0.3f; // 0..1
     float budgetDb = 6.f;         // 0..12
     float link = 1.f;             // 0..1
     float displayMix = 1.f;       // only scales what the UI reports
@@ -65,12 +65,20 @@ private:
     const float* detOwn[2] = { nullptr, nullptr };
     Pipe pipes[3];
     std::vector<double> ps;
+    std::vector<int> pkIdx;
+    int partialMaxBins = 20;
     std::vector<float> clipv, M, rangeW, capW, harmFactor, hw, aCoef, rCoef, gA, gB;
     std::vector<int> lo, hi, loW, hiW;
     int budgetLo = 0, budgetHi = 0, pitchBins = 0, fluxLo = 0;
     // pitch
     std::vector<float> candPos, Pbuf;
     float f0 = 0.f, f0Conf = 0.f;
+    float pitchHz[3] = {}, pitchW[3] = {};
+    std::vector<float> hwS;
+    float hwAtk = 0.5f, hwRel = 0.1f;
+    std::vector<float> combK, combSig, combLvl, combRef;
+    std::vector<int> combSlot, combOk;
+    int combN = 0;
     // ui mapping
     int ptLo[kUiPoints], ptHi[kUiPoints];
     float ptPos[kUiPoints];

@@ -223,12 +223,12 @@ inline chiller::dsp::LearnResult emulateLearn(const std::vector<float>& x, doubl
         e.readUi(f);
         if (f.frameCounter != last) { last = f.frameCounter; acc.add(f, cur.thresholdDb); }
     }
-    return acc.finish(cur.rangeLowHz, cur.rangeHighHz, cur.releaseMs, cur.maxCutDb, resolvedFromHz(mode, sr));
+    return acc.finish(cur.rangeLowHz, cur.rangeHighHz, cur.releaseMs, cur.maxCutDb, resolvedFromHz(mode, sr), cur.harmonicProtect);
 }
 
 inline chiller::dsp::SuppressorParams withLearn(chiller::dsp::SuppressorParams p, const chiller::dsp::LearnResult& r)
 {
-    p.thresholdDb = r.threshold; p.amount = r.amount; p.releaseMs = r.release; p.maxCutDb = r.maxCut; p.rangeLowHz = r.rangeLow;
+    p.thresholdDb = r.threshold; p.amount = r.amount; p.releaseMs = r.release; p.maxCutDb = r.maxCut; p.rangeLowHz = r.rangeLow; p.harmonicProtect = r.harmonicProtect;
     return p;
 }
 
