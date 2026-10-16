@@ -105,6 +105,15 @@ void LookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& b, const
         g.drawRoundedRectangle(r, rControl, 1.f);
         return;
     }
+    if (style == "slot" || style == "warn") { // outline buttons: toggled on = coloured text + border (accent / amber)
+        const auto on_edge = style == "warn" ? amber : accentDim;
+        auto c = enabled ? (down ? raised.darker(0.15f) : (over ? raised.brighter(0.12f) : raised)) : raised;
+        g.setColour(c);
+        g.fillRoundedRectangle(r, rControl);
+        g.setColour(!enabled ? edgeSoft : (on ? on_edge : (over ? edge.brighter(0.3f) : edge)));
+        g.drawRoundedRectangle(r, rControl, 1.f);
+        return;
+    }
     // standard button; a toggled-on standard button is a primary (acid-green) state
     auto c = on ? accent : base;
     if (!enabled) c = c.withMultipliedAlpha(0.5f);
@@ -123,6 +132,7 @@ void LookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool ov
     const bool on = b.getToggleState(), enabled = b.isEnabled();
     juce::Colour c;
     if (style == "primary") c = enabled ? juce::Colours::black : juce::Colour(0xff1b2208);
+    else if (style == "slot" || style == "warn") c = !enabled ? textDisabled : (on ? (style == "warn" ? amber : accent) : (over ? textPrimary : textPrimary));
     else if (style == "ghost") c = enabled ? (over ? textPrimary : textLabel) : textDisabled;
     else if (!enabled) c = textSecondary.withAlpha(0.55f);
     else c = on ? juce::Colours::black : b.findColour(juce::TextButton::textColourOffId);
@@ -146,10 +156,12 @@ void LookAndFeel::drawToggleButton(juce::Graphics& g, juce::ToggleButton& b, boo
     g.setColour(on ? juce::Colours::black : (over ? textLabel : textSecondary));
     g.fillEllipse(on ? pill.getRight() - kd - 2.f : pill.getX() + 2.f, pill.getY() + 2.f, kd, kd);
     if (b.getButtonText().isNotEmpty()) {
-        g.setColour(!enabled ? textDisabled : (on ? textPrimary : textLabel));
+        juce::Colour tc = on ? textPrimary : textLabel;
+        if (b.getProperties().contains("chTextColour")) tc = juce::Colour((juce::uint32) (juce::int64) b.getProperties()["chTextColour"]);
+        g.setColour(!enabled ? textDisabled : tc);
         g.setFont(fLabel());
-        g.drawText(b.getButtonText(), (int) (pill.getRight() + 5.f), 0, b.getWidth() - (int) pw - 6, b.getHeight(),
-                   juce::Justification::centredLeft);
+        g.drawFittedText(b.getButtonText(), juce::Rectangle<int>((int) (pill.getRight() + 6.f), 0, b.getWidth() - (int) pw - 8, b.getHeight()),
+                         juce::Justification::centredLeft, 1, 0.78f);
     }
     if (b.hasKeyboardFocus(false)) {
         g.setColour(focus.withAlpha(0.6f));

@@ -6,9 +6,9 @@ ChillerEditor::ChillerEditor(ChillerProcessor& p) : AudioProcessorEditor(&p), pr
     setLookAndFeel(&laf);
 
     addAndMakeVisible(content);
-    top = std::make_unique<chui::TopBar>(p);
-    explain = std::make_unique<chui::SpectrumView>(p);
-    harshness = std::make_unique<chui::HarshnessStrip>();
+    top = std::make_unique<chui::TopBar>(p, state);
+    explain = std::make_unique<chui::SpectrumView>(p, state);
+    harshness = std::make_unique<chui::HarshnessStrip>(p, state);
     detect = chui::makeDetectPanel(p);
     speed = chui::makeSpeedPanel(p);
     protect = chui::makeProtectPanel(p);
@@ -19,15 +19,21 @@ ChillerEditor::ChillerEditor(ChillerProcessor& p) : AudioProcessorEditor(&p), pr
                                 (juce::Component*) stereo.get(), (juce::Component*) output.get() })
         content.addAndMakeVisible(c);
 
-    // fixed design layout, scaled as a whole
-    top->setBounds(8, 6, 1084, 46);
-    explain->setBounds(8, 58, 860, 380);
-    harshness->setBounds(876, 58, 216, 380);
-    detect->setBounds(8, 446, 300, 226);
-    speed->setBounds(316, 446, 220, 226);
-    protect->setBounds(544, 446, 220, 226);
-    stereo->setBounds(772, 446, 120, 226);
-    output->setBounds(900, 446, 192, 226);
+    // fixed design layout (same geometry as the HTML mock-up)
+    top->setBounds(8, 8, 1084, 46);
+    explain->setBounds(8, 62, 880, 452);
+    harshness->setBounds(896, 62, 196, 452);
+    // bottom zone: 5 panels, weights 3:3:4:2:4, 8 px gaps (1084 px wide in total)
+    {
+        const int total = 1084 - 4 * 8, unitsX16[5] = { 3, 3, 4, 2, 4 };
+        chui::Panel* panels[5] = { detect.get(), speed.get(), protect.get(), stereo.get(), output.get() };
+        float x = 8.f;
+        for (int i = 0; i < 5; ++i) {
+            const float w = (float) total * (float) unitsX16[i] / 16.f;
+            panels[i]->setBounds(juce::Rectangle<float>(x, 522.f, w, 150.f).toNearestInt());
+            x += w + 8.f;
+        }
+    }
 
     constrainer.setFixedAspectRatio((double) kW / (double) kH);
     constrainer.setSizeLimits(kW / 2, kH / 2, kW * 2, kH * 2);   // 550x340 .. 2200x1360
@@ -53,4 +59,9 @@ void ChillerEditor::resized()
     content.setBounds(0, 0, kW, kH);
 }
 
-void ChillerEditor::timerCallback() { chui::Tickable::tickAll(); }
+void ChillerEditor::tickNow()
+{
+    proc.readUi(state.frame);
+    state.haveFrame = state.frame.frameCounter > 0;
+    chui::Tickable::tickAll();
+}

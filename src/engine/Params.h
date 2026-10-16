@@ -26,7 +26,7 @@ enum Id : int {
     // protect
     transientPass, harmonicProtect, budget,
     // stereo
-    stereoMode, link,
+    stereoMode, link, scKey,
     // output
     mix, trim, output, delta, autoGain,
     // global
@@ -36,7 +36,7 @@ enum Id : int {
 } // namespace pid
 
 // Parameter-state version, bump when ids change meaning.
-constexpr int kStateVersion = 1;
+constexpr int kStateVersion = 2;
 
 const std::vector<ParamDef>& paramDefs();              // size == pid::count
 int findParam(const std::string& id);                  // -1 if missing

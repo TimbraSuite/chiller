@@ -3,7 +3,7 @@
 Chiller is a free, open-source resonance suppressor (effect plugin). The work is split into phases; each phase ends
 in a tagged pre-release. Phases may shift, the order will not change much.
 
-## Foundation: v0.0 (this repository state)
+## Foundation: v0.0 (done)
 
 Plugin shell, no suppression yet.
 
@@ -12,9 +12,12 @@ Plugin shell, no suppression yet.
 - Modes Live / Mix / Master, latency-compensated dry/wet, trim/output, Delta, soft bypass
 - Full parameter table, UI shell (top bar, Explain view, panels), unit tests
 
-## Core: v0.1 alpha
+## Core: v0.1 alpha (done, see docs/release-notes/v0.1.0-alpha.md)
 
-The first version that actually suppresses resonances.
+The first version that actually suppresses resonances. It also pulled forward parts of the later phases: M/S and Link,
+sidechain key, Master mode, harmonic and transient protection, Budget, presets, A/B, undo/redo, Auto-gain, Speed Tilt,
+a simple LEARN, and the harshness strip. Still open from those phases: bands with per-band overrides, user presets,
+Unmask, Freeze-to-EQ.
 
 - Mix-mode engine: spectral-envelope detection, per-bin gain computation, smoothing
 - Main controls live: Threshold, Amount, Focus, Attack, Release, Max Cut, Range Low/High, Mix
@@ -43,7 +46,7 @@ The first version that actually suppresses resonances.
 - **Learn**: listen to a passage and set up detection automatically
 - **Unmask** with a sidechain: carve space for another track
 - **Freeze-to-EQ**: convert the current reduction curve to static EQ bands
-- **Live** mode: low-latency engine (512-point STFT)
+- **Live** mode: dedicated low-latency engine (v0.1 ships the same algorithm with a 256-point STFT)
 - LV2 polish and wider host testing
 - User manual, community preset pack, 1.0 release
 

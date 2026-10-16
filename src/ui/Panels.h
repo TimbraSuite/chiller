@@ -7,52 +7,63 @@
 
 namespace chui {
 
-// A titled group of controls. Default layout is a centred grid with `cols` columns; panels with
-// special content (stereo, output) supply their own layout function.
+// A titled group of controls with a custom layout function.
 class Panel : public juce::Component {
 public:
-    explicit Panel(juce::String title, int columns = 3) : title(std::move(title)), cols(columns) {}
+    explicit Panel(juce::String t) : title(std::move(t)) {}
     void paint(juce::Graphics& g) override { paintPanel(g, getLocalBounds(), title); }
-    void resized() override;
+    void resized() override { if (layout) layout(getLocalBounds().withTrimmedTop(28).reduced(8, 0)); }
 
-    template <typename T> T* add(std::unique_ptr<T> c, bool inGrid = true)
+    template <typename T> T* add(std::unique_ptr<T> c)
     {
         auto* raw = c.get();
         addAndMakeVisible(raw);
-        if (inGrid) cells.push_back(raw);
         owned.push_back(std::move(c));
         return raw;
     }
-    std::function<void(juce::Rectangle<int> body)> customLayout;
-    juce::Rectangle<int> bodyArea() const { return getLocalBounds().withTrimmedTop(24).reduced(6, 4); }
+    std::function<void(juce::Rectangle<int> body)> layout;
 
 private:
     juce::String title;
-    int cols;
-    std::vector<juce::Component*> cells;
     std::vector<std::unique_ptr<juce::Component>> owned;
 };
 
-// Right strip next to the Explain view: reserved for the harshness meter (v0.3).
-class HarshnessStrip : public juce::Component {
+class LearnButton : public juce::TextButton {
 public:
-    void paint(juce::Graphics&) override;
+    LearnButton() : juce::TextButton("LEARN") { setStyle(*this, "primary"); }
+    float progress = -1.f;
+    void paintOverChildren(juce::Graphics&) override;
 };
 
 class TopBar : public juce::Component, public Tickable {
 public:
-    explicit TopBar(ChillerProcessor&);
+    TopBar(ChillerProcessor&, UiState&);
     void paint(juce::Graphics&) override;
     void resized() override;
     void tick() override;
 private:
+    void startLearn();
+    void finishLearn();
+    void syncPresetCombo();
+
     ChillerProcessor& proc;
-    juce::TextButton preset { "Init" }, abA { "A" }, abB { "B" }, undo { "Undo" }, redo { "Redo" }, learn { "LEARN" };
+    UiState& st;
+    IconButton prev { IconButton::Prev }, next { IconButton::Next }, undo { IconButton::Undo }, redo { IconButton::Redo };
+    juce::ComboBox preset;
+    juce::TextButton abA { "A" }, abB { "B" }, abCopy { "A>B" };
+    LearnButton learn;
     std::unique_ptr<ParamCombo> mode;
-    std::unique_ptr<ParamToggle> bypass;
+    std::unique_ptr<ParamButton> bypass;
     std::unique_ptr<Meter> meter;
-    juce::String latencyText;
-    juce::Rectangle<int> wordmarkArea, modeLabelArea, latencyArea;
+    juce::String latencyText, cpuText;
+    juce::Rectangle<int> logoArea, latencyArea, cpuArea;
+    std::vector<int> separators;
+
+    bool learning = false;
+    juce::uint32 learnStart = 0;
+    unsigned long long lastLearnFrame = 0;
+    int learnSamples = 0;
+    std::vector<float> learnExcess, learnLevel;
 };
 
 std::unique_ptr<Panel> makeDetectPanel(ChillerProcessor&);

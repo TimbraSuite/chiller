@@ -3,6 +3,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include "dsp/Engine.h"
 #include "engine/Params.h"
+#include "engine/Presets.h"
 #include <array>
 #include <atomic>
 #include <vector>
@@ -41,13 +42,30 @@ public:
     float getRaw(int id) const { return raw[(size_t) id]->load(std::memory_order_relaxed); }   // normalized
     float getReal(int id) const { return chiller::normToReal(id, getRaw(id)); }
 
-    // ---- UI data ----
+    // ---- UI data (message thread) ----
     juce::String presetName { "Init" };
-    void copyInputScope(float* dst, int count) const;   // last `count` input samples (mono, post-trim)
+    int presetIndex = 0;
+    void readUi(chiller::dsp::UiFrame& f) { engine.readUi(f); }
     std::atomic<float> peakL { 0.f }, peakR { 0.f };    // output sample peaks (decaying)
+    std::atomic<float> cpuLoad { 0.f };                 // fraction of the buffer time spent in processBlock
     double getLatencyMs() const { return currentSampleRate > 0.0 ? 1000.0 * getLatencySamples() / currentSampleRate : 0.0; }
     double currentSampleRate = 48000.0;
-    static constexpr int kScopeSize = 8192;
+
+    // ---- parameter-state helpers (message thread) ----
+    chiller::ParamState captureState() const;
+    void applyState(const chiller::ParamState&);        // sets every parameter as a host gesture
+    void setParamReal(int id, float real);              // one parameter, as a gesture
+    void loadPreset(int index);
+    // undo / redo of user edits: controls call historyCommit() when a gesture ends
+    void historyCommit();
+    bool canUndo() const { return histIdx > 0; }
+    bool canRedo() const { return histIdx + 1 < (int) hist.size(); }
+    void undo();
+    void redo();
+    // A/B compare
+    int abActive() const { return abSlot; }
+    void selectAB(int slot);
+    void copyToOtherAB();
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -58,13 +76,15 @@ private:
     std::array<juce::RangedAudioParameter*, (size_t) chiller::pid::count> params {};
     std::array<std::atomic<float>*, (size_t) chiller::pid::count> raw {};
     chiller::dsp::Mode activeMode = chiller::dsp::Mode::Mix;
-    int numChannelsPrepared = 2, maxBlock = 512;
+    int maxBlock = 512;
     juce::AudioBuffer<float> wet;
-    std::vector<float> trimGain;
-    juce::SmoothedValue<float> sMix, sTrim, sOutput, sBypass, sDelta;
-
-    std::array<float, kScopeSize> scope {};
-    std::atomic<uint32_t> scopeWrite { 0 };
+    juce::SmoothedValue<float> sMix, sTrim, sOutput, sBypass, sDelta, sAuto;
+    float eDry = 0.f, eWet = 0.f, eCoef = 0.001f;
+    std::vector<chiller::ParamState> hist;
+    int histIdx = 0;
+    chiller::ParamState abState[2];
+    bool abValid[2] = { true, false };
+    int abSlot = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChillerProcessor)
 };

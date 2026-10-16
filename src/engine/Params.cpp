@@ -42,6 +42,7 @@ std::vector<ParamDef> buildDefs()
     // ---- stereo ----
     choice(stereoMode, "stereo_mode", "Stereo Mode", { "L/R", "M/S" }, 0);
     set(link, "link", "Link", 0.f, 100.f, 100.f, Curve::Lin, "%");
+    toggle(scKey, "sc_key", "Sidechain Key", false);
     // ---- output ----
     set(mix, "mix", "Mix", 0.f, 100.f, 100.f, Curve::Lin, "%");
     set(trim, "trim", "Trim", -24.f, 24.f, 0.f, Curve::Lin, "dB");
@@ -49,7 +50,7 @@ std::vector<ParamDef> buildDefs()
     toggle(delta, "delta", "Delta", false);
     toggle(autoGain, "auto_gain", "Auto Gain", false);
     // ---- global ----
-    choice(mode, "mode", "Mode", { "Live", "Mix", "Master" }, 1);
+    choice(mode, "mode", "Mode", { "Live (low latency)", "Mix", "Master" }, 1);
     toggle(bypass, "bypass", "Bypass", false);
     return d;
 }

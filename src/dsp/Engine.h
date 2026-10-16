@@ -1,8 +1,9 @@
 #pragma once
-// Multi-channel suppressor engine. Foundation: transparent passthrough with mode-dependent
-// latency. All three modes' STFTs are allocated in prepare(), so setMode() is real-time safe.
+// Stereo suppressor engine. One Suppressor per mode is allocated in prepare(), so switching modes is
+// real-time safe. The audio path is delayed by latencySamples() in every mode.
 #include "Mode.h"
-#include "Stft.h"
+#include "Suppressor.h"
+#include "Telemetry.h"
 #include <memory>
 #include <vector>
 
@@ -10,20 +11,25 @@ namespace chiller::dsp {
 
 class Engine {
 public:
-    void prepare(double sampleRate, int numChannels, Mode mode);
+    void prepare(double sampleRate, Mode mode);
     void setMode(Mode m);                 // real-time safe; clears the new mode's state
     Mode mode() const { return current; }
-    int latencySamples() const { return latencyForMode(current); }
+    int latencySamples() const { return suppressors[(size_t) current] ? suppressors[(size_t) current]->latencySamples() : 0; }
+    double sampleRate() const { return sr; }
     void reset();
-    // In place. channels = numChannels pointers of `count` samples each.
-    void process(float* const* channels, int count);
+    void setParams(const SuppressorParams& p) { if (auto* s = active()) s->setParams(p); lastParams = p; }
+    // In place on two channels. scL/scR: optional sidechain (null = none).
+    void process(float* l, float* r, const float* scL, const float* scR, int count);
+    // UI side (message thread only): newest published frame.
+    void readUi(UiFrame& out) { ui.read(out); }
 
 private:
+    Suppressor* active() const { return suppressors[(size_t) current].get(); }
     Mode current = Mode::Mix;
-    int numCh = 0;
     double sr = 48000.0;
-    // [mode][channel]; Live has no STFT yet
-    std::vector<std::unique_ptr<Stft>> stft[(int) Mode::Count];
+    SuppressorParams lastParams;
+    TripleBuffer<UiFrame> ui;
+    std::unique_ptr<Suppressor> suppressors[(size_t) Mode::Count];
 };
 
 // Fixed-length delay used for the latency-compensated dry path.

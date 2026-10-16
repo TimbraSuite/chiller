@@ -18,6 +18,17 @@ struct Tickable {
     static bool isLive(const juce::Component& c) { return forceShowing() || c.isShowing(); }
 };
 
+// State shared by the editor's displays: the newest frame from the audio thread plus transient UI state.
+struct UiState {
+    chiller::dsp::UiFrame frame;
+    bool haveFrame = false;
+    float learnProgress = -1.f;          // < 0 idle, 0..1 while LEARN is listening
+    juce::String toast;
+    juce::uint32 toastUntil = 0;
+    void showToast(const juce::String& t) { toast = t; toastUntil = juce::Time::getMillisecondCounter() + 3500; }
+    bool toastVisible() const { return toast.isNotEmpty() && (juce::int32) (toastUntil - juce::Time::getMillisecondCounter()) > 0; }
+};
+
 //==============================================================================================
 // Rotary parameter control: arc + machined body + pointer, label underneath (value while touched).
 class Knob : public juce::Component, public juce::SettableTooltipClient {
@@ -43,6 +54,7 @@ public:
     void enterValue();   // typed value entry (right-click menu / Enter key)
 
 private:
+    void commit() { proc.historyCommit(); }
     juce::Rectangle<float> circleArea() const;
     ChillerProcessor& proc;
     int pid;
@@ -67,9 +79,31 @@ private:
 class ParamToggle : public juce::ToggleButton {
 public:
     ParamToggle(ChillerProcessor& p, int paramId, const juce::String& text);
+    // Text that changes with the state (e.g. "L/R" / "M/S").
+    void setStateTexts(const juce::String& off, const juce::String& on);
+private:
+    int pid;
+    juce::String offText, onText;
+    std::unique_ptr<juce::ParameterAttachment> att;
+};
+
+// Parameter toggle drawn as a normal button ("slot" = accent when on, "warn" = amber when on).
+class ParamButton : public juce::TextButton {
+public:
+    ParamButton(ChillerProcessor& p, int paramId, const juce::String& text, const char* style = "warn");
 private:
     int pid;
     std::unique_ptr<juce::ParameterAttachment> att;
+};
+
+// Small square button with a drawn icon.
+class IconButton : public juce::Button {
+public:
+    enum Icon { Prev, Next, Undo, Redo };
+    explicit IconButton(Icon i) : juce::Button({}), icon(i) {}
+    void paintButton(juce::Graphics&, bool over, bool down) override;
+private:
+    Icon icon;
 };
 
 } // namespace chui

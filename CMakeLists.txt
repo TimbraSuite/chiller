@@ -6,7 +6,7 @@ if (APPLE AND NOT CMAKE_OSX_ARCHITECTURES)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS architectures" FORCE)
 endif()
 
-project(Chiller VERSION 0.0.1 LANGUAGES C CXX)
+project(Chiller VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -34,6 +34,13 @@ endif()
 file(GLOB CH_TEST_SOURCES CONFIGURE_DEPENDS src/tests/test_${CH_TEST_FILTER}*.cpp)
 add_executable(chiller_tests src/tests/TestMain.cpp ${CH_TEST_SOURCES})
 target_link_libraries(chiller_tests PRIVATE chiller_dsp)
+
+# ---- Offline render check (no JUCE): prints before/after band energies for generated test signals ----
+option(CH_BUILD_RENDER "Build the offline render check tool" ON)
+if (CH_BUILD_RENDER)
+    add_executable(chiller_render tools/render/main.cpp)
+    target_link_libraries(chiller_render PRIVATE chiller_dsp)
+endif()
 
 # ---- Plugin ---------------------------------------------------------------------------------
 if (CH_BUILD_PLUGIN)

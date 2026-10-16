@@ -4,19 +4,41 @@
 sound and tames them dynamically, so a mix or a master can sit smoother without dulling it. It is an audio
 **effect** plugin: VST3, CLAP, Audio Unit (macOS), LV2 (Linux) and a standalone app.
 
-> **Status: Foundation (v0.0.1), pre-alpha.** The plugin shell, parameters, UI layout, latency handling, build and
-> CI are in place, but **there is no resonance suppression yet**: audio passes through unchanged (with the latency
-> of the selected mode). The suppression engine arrives in v0.1. See [docs/PLAN.md](docs/PLAN.md) for the roadmap.
+> **Status: v0.1.0 alpha.** The suppression engine works: per-bin resonance detection against an expected curve,
+> protection (harmonics, transients, budget), Live / Mix / Master modes, M/S and sidechain key, and the Explain view.
+> It has had no hands-on host testing on Windows and macOS yet. Release notes: [docs/release-notes/v0.1.0-alpha.md](docs/release-notes/v0.1.0-alpha.md).
+> Roadmap: [docs/PLAN.md](docs/PLAN.md).
 
 ## What works today
 
-- Transparent STFT passthrough (Hann window, 75 % overlap, weighted overlap-add) with exact, reported latency
-- Mode: **Live** (0 latency passthrough for now), **Mix** (1024-point STFT), **Master** (4096-point STFT); the plugin
-  re-reports its latency to the host when the mode changes
-- Latency-compensated dry/wet mix, trim, output gain, Delta (listen to what is removed), soft bypass that keeps latency
-- Full planned parameter set exposed to the host (most of it inert until v0.1 to v0.3)
-- Resizable UI with a live input spectrum (the "Explain" view)
-- Optional stereo sidechain input bus (unused until v0.2)
+- **Resonance suppression**: Threshold, Amount, Focus, Max Cut, Range Low / High, Attack, Release, Speed Tilt
+- **Protect**: Harmonic Protect (pitch-aware), Transient Pass, Budget (caps the average reduction)
+- **Modes** with exact, reported latency: Live (low latency, 5.3 ms @ 48 kHz), Mix (21 ms), Master (85 ms)
+- Stereo: L/R or M/S, Link; **sidechain key** input
+- Output: latency-compensated Mix, Trim, Output, **Delta** (listen to what is removed), Auto-gain, soft Bypass
+- **Explain view**: input spectrum, expected curve, applied cut, labelled peaks, harmonic ticks, history heat map,
+  harshness in/out and average reduction vs budget
+- Six factory presets, A/B compare, undo/redo, LEARN
+
+## Install
+
+Pre-built zips are produced by CI for every push (GitHub Actions artifacts `chiller-windows` and `chiller-macos`) and
+attached to releases.
+
+**Windows:** copy the whole folder `Chiller.vst3` to `C:\Program Files\Common Files\VST3\` and rescan in your DAW.
+
+**macOS:** copy `Chiller.vst3` to `~/Library/Audio/Plug-Ins/VST3/` and `Chiller.component` (Audio Unit) to
+`~/Library/Audio/Plug-Ins/Components/`. The builds are unsigned, so remove the quarantine flag once and restart the DAW:
+
+```bash
+xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Chiller.vst3 ~/Library/Audio/Plug-Ins/Components/Chiller.component
+```
+
+Or use the one-line installer, which avoids the quarantine: `curl -fsSL https://raw.githubusercontent.com/huuba91/chiller/main/install-mac.sh | bash`
+
+**Ableton Live:** Preferences > Plug-ins > switch on "Use VST3 Plug-in System Folders" (macOS: also "Use Audio Units"),
+press Rescan. Chiller appears under Plug-ins > Effects (manufacturer Neuroforge). For the sidechain key, pick the source
+track in the plug-in's sidechain chooser and switch on "Sidechain key" in the Explain view.
 
 ## Suite
 
@@ -73,6 +95,12 @@ build\Release\chiller_tests.exe
 cmake -S . -B build-dsp -DCH_BUILD_PLUGIN=OFF && cmake --build build-dsp && build-dsp/chiller_tests
 ```
 
+### Offline render check
+
+`chiller_render` (no JUCE needed) processes generated signals (pink noise with fixed and swept resonances, a harmonic tone)
+and prints before / after band energies; `chiller_render --bench` prints the CPU time per second of audio;
+`--wav <dir>` writes before / after files for listening.
+
 ### UI screenshot
 
 `-DCH_BUILD_TOOLS=ON` adds `chiller_uishot`, which renders the editor to a PNG without a host
@@ -82,12 +110,12 @@ cmake -S . -B build-dsp -DCH_BUILD_PLUGIN=OFF && cmake --build build-dsp && buil
 
 | Path | What |
 | --- | --- |
-| `src/dsp/` | Pure C++20 DSP (no JUCE): FFT, STFT framework, engine. Static lib `chiller_dsp`. |
-| `src/engine/` | Parameter table (`Params.*`), also JUCE-free. |
+| `src/dsp/` | Pure C++20 DSP (no JUCE): FFT, `Suppressor` (STFT + detection + gain), engine, UI telemetry. Static lib `chiller_dsp`. |
+| `src/engine/` | Parameter table (`Params.*`) and factory presets (`Presets.*`), also JUCE-free. |
 | `src/ui/` | JUCE UI (namespace `chui`): look and feel, knobs, displays, panels. |
 | `src/Plugin*.{h,cpp}` | JUCE processor and editor. |
 | `src/tests/` | Unit tests (`chiller_tests`). |
-| `tools/` | Packaging script, UI screenshot tool. |
+| `tools/` | Packaging script, UI screenshot tool (`uishot`), offline render check (`render`). |
 | `presets/community/` | Community presets (JSON), see [CONTRIBUTING.md](CONTRIBUTING.md). |
 
 ## License

@@ -1,10 +1,12 @@
 # Builds Chiller for Windows, macOS and Linux on every push, runs the tests and plugin validators,
 # and on a version tag (v*) publishes a GitHub pre-release with the zips attached.
+# Every run uploads one zip per OS (chiller-windows / chiller-macos / chiller-linux) as a workflow artifact,
+# containing VST3 (+ AU and CLAP on macOS) and an INSTALL.txt, so a build can be downloaded and tried without a release.
 name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'core-v*']
     tags: ['v*']
   pull_request:
   workflow_dispatch:
