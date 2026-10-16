@@ -40,6 +40,8 @@ option(CH_BUILD_RENDER "Build the offline render check tool" ON)
 if (CH_BUILD_RENDER)
     add_executable(chiller_render tools/render/main.cpp)
     target_link_libraries(chiller_render PRIVATE chiller_dsp)
+    add_executable(chiller_analyze tools/render/analyze.cpp)   # real-recording analysis (see tools/render/analyze.cpp)
+    target_link_libraries(chiller_analyze PRIVATE chiller_dsp)
 endif()
 
 # ---- Plugin ---------------------------------------------------------------------------------

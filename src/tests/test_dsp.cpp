@@ -453,3 +453,31 @@ CH_TEST(low_frequency_tone_is_not_a_resonance_in_mix_mode)
         CH_CHECK(a > -0.5);
     }
 }
+
+// ---- regression: bass notes / voice fundamentals up to ~250 Hz must not be cut and released like resonances ----
+// Found with real recordings (voices, strings, a dense mix) in Master mode, where 150-250 Hz harmonics were cut by 1-3 dB and moved the
+// 30-200 Hz level by more than 0.5 dB (std) as the notes changed.
+CH_TEST(bass_and_fundamentals_up_to_250hz_do_not_bounce)
+{
+    const double sr = 48000.0;
+    const int n = (int) (10 * sr), note = (int) (0.4 * sr);
+    auto x = pinkNoise(n, 0.02f, 21);
+    const double f0s[] = { 82.4, 110.0, 146.8, 196.0, 164.8, 130.8, 185.0, 220.0, 123.5, 174.6 };   // a short bassline / melody
+    for (int s = 0; s * note < n; ++s) {
+        const double f0 = f0s[(size_t) s % 10];
+        for (int i = 0; i < note && s * note + i < n; ++i) {
+            const double t = (double) i / sr;
+            const float env = (float) std::min(1.0, t / 0.01) * (float) std::min(1.0, (note - i) / (0.03 * sr));
+            float v = 0.f;
+            for (int h = 1; h <= 8; ++h) v += 0.2f / (float) h * (float) std::sin(2.0 * std::numbers::pi * f0 * h * (double) (s * note + i) / sr);
+            x[(size_t) (s * note + i)] += env * v;
+        }
+    }
+    for (int m = 1; m < 3; ++m) {
+        SuppressorParams def;                         // defaults: the worst case (no LEARN, no Harmonic Protect)
+        const auto b = measureBounce(x, sr, (Mode) m, def, 1.0);
+        CH_INFO("mode %d: 30-200 Hz level change mean %.2f std %.2f dB\n", m, b.lvlMean, b.lvlStd);
+        CH_CHECK(b.lvlStd < 0.5);
+        CH_CHECK(b.lvlMean > -0.6);
+    }
+}

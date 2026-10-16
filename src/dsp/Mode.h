@@ -21,9 +21,11 @@ inline int fftSizeFor(Mode m, double sampleRate)
 
 // Lowest frequency this STFT size can reliably separate (about kResolveBins bins). Below it a bass note or kick
 // cannot be told from a resonance, so the detector fades out over the octave beneath it (see Suppressor) and
-// LEARN does not listen there. 48 kHz: Live 1.1 kHz, Mix 281 Hz, Master 150 Hz (floor; 6 bins would be 70 Hz).
-constexpr float kResolveBins = 6.f;
-constexpr float kBassFloorHz = 150.f;   // even a very fine STFT keeps bass notes (tonal, 30+ dB above their surroundings) out of detection
+// LEARN does not listen there. 48 kHz: Live 1.5 kHz, Mix 375 Hz, Master 300 Hz (floor; 8 bins would be 94 Hz).
+// (Tested on real recordings: with 6 bins / a 150 Hz floor, voice fundamentals, string and bass harmonics at 150-300 Hz were cut and released
+// like resonances, moving the 30-200 Hz level by 0.5-1.5 dB (std) in Master and Mix.)
+constexpr float kResolveBins = 8.f;
+constexpr float kBassFloorHz = 300.f;   // even a very fine STFT keeps bass notes and voice fundamentals (tonal, 30+ dB above their surroundings) out of detection
 inline float resolvedFromHz(int fftSize, double sampleRate)
 {
     return std::max(kBassFloorHz, kResolveBins * (float) (sampleRate / (double) fftSize));

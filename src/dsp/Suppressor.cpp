@@ -23,8 +23,8 @@ constexpr int kPitchHarmonics = 6;
 // detection weight fades to 0 over the octave below that frequency. Time constants also grow towards the lows
 // (x sqrt(1000 Hz / f), at most x kLowSlowMax) so bass is never cut and released at the speed of the highs.
 constexpr float kLowSlowMax = 4.f, kLowSlowAtkMax = 8.f;
-// Low-end cap: below ~150 Hz at most this fraction of Max Cut is ever applied, rising to the full Max Cut at 600 Hz.
-constexpr float kLowCutFraction = 0.35f, kLowCapLoHz = 150.f, kLowCapHiHz = 600.f;
+// Low-end cap: below ~200 Hz at most this fraction of Max Cut is ever applied, rising to the full Max Cut at 900 Hz.
+constexpr float kLowCutFraction = 0.3f, kLowCapLoHz = 200.f, kLowCapHiHz = 900.f;
 } // namespace
 
 Suppressor::Suppressor(double sampleRate, int fftSize, TripleBuffer<UiFrame>* uiBuf)
@@ -355,9 +355,11 @@ void Suppressor::runPipe(Pipe& p, const float* Lraw, const float* harm)
         const float ex = L[k] - p.E[(size_t) k] - thr;
         float g = 0.f;
         if (ex > 0.f) {
-            g = amt * ex * rangeW[(size_t) k] * transFactor;
+            g = amt * ex * transFactor;
             if (harm) g *= harm[k];
-            g = std::min(g, mc * capW[(size_t) k]);
+            // Range / resolvability weight scales the cut after the Max Cut cap: a strong tone in a region the STFT cannot resolve (or outside
+            // Range) must not be cut by the full cap just because its excess is huge.
+            g = std::min(g, mc * capW[(size_t) k]) * rangeW[(size_t) k];
         }
         p.Gt[(size_t) k] = g;
     }
