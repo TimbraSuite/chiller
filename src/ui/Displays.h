@@ -12,7 +12,9 @@ public:
 };
 
 // The Explain view: SPECTRUM (input, expected curve, applied cut hanging from 0 dB, labelled peaks,
-// protected harmonics, sidechain key, range nodes) and HISTORY (scrolling heat map of the reduction).
+// protected harmonics, sidechain key, range nodes, band nodes) and HISTORY (scrolling heat map of the reduction).
+// Band nodes: double-click an empty spot to add one, drag it (left/right = frequency, up/down = depth), mouse wheel = width,
+// double-click = back to 0 %, right-click = remove.
 class SpectrumView : public juce::Component, public Tickable {
 public:
     SpectrumView(ChillerProcessor& p, UiState& s);
@@ -20,11 +22,12 @@ public:
     void resized() override;
     void tick() override;
     void mouseMove(const juce::MouseEvent&) override;
-    void mouseExit(const juce::MouseEvent&) override { hoverX = -1.f; hoverNode = 0; repaint(); }
+    void mouseExit(const juce::MouseEvent&) override { hoverX = -1.f; hoverNode = 0; hoverBand = -1; repaint(); }
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp(const juce::MouseEvent&) override;
     void mouseDoubleClick(const juce::MouseEvent&) override;
+    void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
     void showHistory(bool on) { setView(on ? View::History : View::Spectrum); }   // also used by tools/uishot
     static constexpr int W = 880, H = 452;
@@ -42,6 +45,16 @@ private:
     float yOfLevel(float db) const;
     float nodeX(int node) const;
     int hitNode(juce::Point<float> p) const;
+    // bands
+    chiller::dsp::Bands currentBands() const;
+    float bandX(int b) const;
+    float bandY(int b) const;
+    float yOfDepth(float depth01) const;
+    float depthOfY(float y) const;
+    int hitBand(juce::Point<float> p) const;
+    void paintBands(juce::Graphics&);
+    void setBand(int b, int field, float real);   // as a single gesture
+    void removeBand(int b);
     void pushHistoryColumn();
 
     ChillerProcessor& proc;
@@ -61,6 +74,7 @@ private:
 
     float hoverX = -1.f;
     int hoverNode = 0, dragNode = 0;   // 1 = low cut, 2 = high cut
+    int hoverBand = -1, dragBand = -1;
 };
 
 // Right-hand strip: harshness in/out, average reduction vs budget, legend.

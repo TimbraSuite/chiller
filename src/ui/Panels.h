@@ -46,11 +46,15 @@ private:
     void startLearn();
     void finishLearn();
     void syncPresetCombo();
+    void rebuildPresetMenu();
+    void savePresetDialog();
 
     ChillerProcessor& proc;
     UiState& st;
     IconButton prev { IconButton::Prev }, next { IconButton::Next }, undo { IconButton::Undo }, redo { IconButton::Redo };
     juce::ComboBox preset;
+    juce::Array<juce::File> shownUserPresets;
+    int presetScanTicks = 0;
     juce::TextButton abA { "A" }, abB { "B" }, abCopy { "A>B" };
     LearnButton learn;
     std::unique_ptr<ParamCombo> mode;

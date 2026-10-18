@@ -57,6 +57,7 @@ void TabButton::paintButton(juce::Graphics& g, bool over, bool)
 namespace geo {
 constexpr float x0 = 46.f, x1 = 880.f - 14.f, y0 = 40.f, y1 = 452.f - 24.f;
 constexpr float yZero = y0 + 8.f, dbPx = 6.5f, levelTop = yZero + 40.f;
+constexpr float bandMid = 0.5f * (levelTop + y1) + 10.f, bandSpan = 110.f;   // band lane: centre line = 0 %, +-bandSpan px = +-100 %
 } // namespace geo
 
 SpectrumView::SpectrumView(ChillerProcessor& p, UiState& s) : proc(p), st(s)
@@ -111,6 +112,133 @@ int SpectrumView::hitNode(juce::Point<float> p) const
     for (int n = 1; n <= 2; ++n)
         if (std::hypot(nodeX(n) - p.x, y - p.y) < 14.f) return n;
     return 0;
+}
+
+//----------------------------------------------------------------------------------------------
+// Bands
+//----------------------------------------------------------------------------------------------
+dsp::Bands SpectrumView::currentBands() const
+{
+    dsp::Bands bs {};
+    for (int b = 0; b < pid::kBands; ++b) {
+        auto& bd = bs[(size_t) b];
+        bd.on = proc.getReal(pid::band(b, pid::bandOn)) >= 0.5f;
+        bd.hz = proc.getReal(pid::band(b, pid::bandFreq));
+        bd.depth = proc.getReal(pid::band(b, pid::bandDepth)) / 100.f;
+        bd.widthOct = proc.getReal(pid::band(b, pid::bandWidth));
+    }
+    return bs;
+}
+
+float SpectrumView::yOfDepth(float d) const { return geo::bandMid - juce::jlimit(-1.f, 1.f, d) * geo::bandSpan; }
+float SpectrumView::depthOfY(float y) const { return juce::jlimit(-1.f, 1.f, (geo::bandMid - y) / geo::bandSpan); }
+float SpectrumView::bandX(int b) const { return xOfHz(proc.getReal(pid::band(b, pid::bandFreq))); }
+float SpectrumView::bandY(int b) const { return yOfDepth(proc.getReal(pid::band(b, pid::bandDepth)) / 100.f); }
+
+int SpectrumView::hitBand(juce::Point<float> p) const
+{
+    if (view != View::Spectrum) return -1;
+    int best = -1;
+    float bestD = 13.f;
+    for (int b = 0; b < pid::kBands; ++b) {
+        if (proc.getReal(pid::band(b, pid::bandOn)) < 0.5f) continue;
+        const float d = std::hypot(bandX(b) - p.x, bandY(b) - p.y);
+        if (d < bestD) { bestD = d; best = b; }
+    }
+    return best;
+}
+
+void SpectrumView::setBand(int b, int field, float real)
+{
+    proc.setParamReal(pid::band(b, field), real);
+}
+
+void SpectrumView::removeBand(int b)
+{
+    setBand(b, pid::bandOn, 0.f);
+    setBand(b, pid::bandDepth, 0.f);
+    setBand(b, pid::bandWidth, 1.f);
+    proc.historyCommit();
+}
+
+void SpectrumView::paintBands(juce::Graphics& g)
+{
+    using namespace tok;
+    const auto bs = currentBands();
+    const bool any = std::any_of(bs.begin(), bs.end(), [](const dsp::Band& b) { return b.on; });
+    if (!any && hoverX < 0.f) return;
+    // centre line (0 %)
+    {
+        juce::Path line, dashed;
+        line.startNewSubPath(geo::x0, geo::bandMid); line.lineTo(geo::x1, geo::bandMid);
+        const float dash[] = { 1.5f, 4.f };
+        juce::PathStrokeType(1.f).createDashedStroke(dashed, line, dash, 2);
+        g.setColour(textLabel.withAlpha(any ? 0.3f : 0.16f));
+        g.fillPath(dashed);
+    }
+    if (!any) return;
+    // combined depth curve: up (green) = stronger processing, down (purple) = protected
+    juce::Path curve;
+    const int steps = 220;
+    for (int i = 0; i <= steps; ++i) {
+        const float x = geo::x0 + (geo::x1 - geo::x0) * (float) i / (float) steps, hz = hzOfX(x);
+        float v = 0.f;
+        for (const auto& b : bs) if (b.on) v += b.depth * dsp::bandBell(b, hz);
+        const float y = yOfDepth(v);
+        if (i == 0) curve.startNewSubPath(x, y); else curve.lineTo(x, y);
+    }
+    auto fill = curve;
+    fill.lineTo(geo::x1, geo::bandMid); fill.lineTo(geo::x0, geo::bandMid); fill.closeSubPath();
+    const juce::PathStrokeType stroke(1.6f, juce::PathStrokeType::curved);
+    for (int half = 0; half < 2; ++half) {   // above the centre line in green, below in purple
+        const int top = half == 0 ? (int) geo::y0 : (int) geo::bandMid;
+        const int bottom = half == 0 ? (int) std::ceil(geo::bandMid) : (int) geo::y1;
+        const juce::Colour c = half == 0 ? accent : protectPurple;
+        g.saveState();
+        g.reduceClipRegion(juce::Rectangle<int>((int) geo::x0, top, (int) (geo::x1 - geo::x0), bottom - top));
+        g.setColour(c.withAlpha(0.11f));
+        g.fillPath(fill);
+        g.setColour(c.withAlpha(0.9f));
+        g.strokePath(curve, stroke);
+        g.restoreState();
+    }
+
+    // nodes
+    const auto nf = font(11.f, Weight::Bold);
+    for (int b = 0; b < pid::kBands; ++b) {
+        if (!bs[(size_t) b].on) continue;
+        const float x = bandX(b), y = bandY(b), d = bs[(size_t) b].depth;
+        const bool hot = hoverBand == b || dragBand == b;
+        const juce::Colour c = d > 0.005f ? accent : (d < -0.005f ? protectPurple : textPrimary);
+        const float rr = hot ? 9.f : 7.5f;
+        g.setColour(juce::Colour(0xf0141516));
+        g.fillEllipse(x - rr, y - rr, rr * 2.f, rr * 2.f);
+        g.setColour(hot ? c : c.withAlpha(0.85f));
+        g.drawEllipse(x - rr, y - rr, rr * 2.f, rr * 2.f, hot ? 2.f : 1.6f);
+        g.setFont(nf);
+        g.drawText(juce::String(b + 1), juce::Rectangle<float>(x - rr, y - rr, rr * 2.f, rr * 2.f).toNearestInt(), juce::Justification::centred);
+        if (hot) {
+            const auto& bd = bs[(size_t) b];
+            const juce::String l1 = juce::String(bd.hz >= 1000.f ? juce::String(bd.hz / 1000.f, 2) + " kHz" : juce::String((int) std::lround(bd.hz)) + " Hz")
+                                    + kDot + (d >= 0.005f ? "+" : (d <= -0.005f ? kMinus : juce::String())) + juce::String((int) std::lround(std::abs(d) * 100.f)) + " %"
+                                    + kDot + juce::String(bd.widthOct, 2) + " oct";
+            const juce::String l2 = "wheel: width" + kDot + "double-click: 0 %" + kDot + "right-click: remove";
+            const auto f1 = font(11.f, Weight::SemiBold), f2 = font(10.f, Weight::Regular);
+            const float w = juce::jmax(textWidth(f1, l1), textWidth(f2, l2)) + 14.f;
+            const float px = juce::jlimit(geo::x0 + 2.f, geo::x1 - w - 2.f, x - w / 2.f);
+            const float py = y < geo::bandMid ? y + rr + 8.f : y - rr - 38.f;
+            g.setColour(juce::Colour(0xe6141516));
+            g.fillRoundedRectangle(px, py, w, 30.f, 3.f);
+            g.setColour(edge);
+            g.drawRoundedRectangle(px + 0.5f, py + 0.5f, w - 1.f, 29.f, 3.f, 1.f);
+            g.setColour(c);
+            g.setFont(f1);
+            g.drawText(l1, (int) px, (int) py + 3, (int) w, 13, juce::Justification::centred);
+            g.setColour(textSecondary);
+            g.setFont(f2);
+            g.drawText(l2, (int) px, (int) py + 16, (int) w, 12, juce::Justification::centred);
+        }
+    }
 }
 
 //----------------------------------------------------------------------------------------------
@@ -231,7 +359,13 @@ void SpectrumView::paintSpectrum(juce::Graphics& g)
         g.setColour(inputIce);
         g.strokePath(p, juce::PathStrokeType(1.3f, juce::PathStrokeType::curved));
         // expected curve (dashed), drawn with the threshold added
-        juce::Path ep = curve(expS, [&](float v) { return yOfLevel(v); }), dashed;
+        std::array<float, N> expShown = expS;   // a boosted band lowers the threshold there: show the curve where cutting starts
+        {
+            const auto bs = currentBands();
+            if (dsp::anyBandActive(bs))
+                for (int i = 0; i < N; ++i) expShown[(size_t) i] -= dsp::bandEffect(bs, dsp::uiPointHz(i)).sensDb;
+        }
+        juce::Path ep = curve(expShown, [&](float v) { return yOfLevel(v); }), dashed;
         const float dash[] = { 5.f, 4.f };
         juce::PathStrokeType(1.f).createDashedStroke(dashed, ep, dash, 2);
         g.setColour(textSecondary.withAlpha(0.9f));
@@ -360,6 +494,8 @@ void SpectrumView::paintSpectrum(juce::Graphics& g)
         g.setFont(lf);
         g.drawText(lab, (int) lx, (int) ly + 1, (int) lw, 14, juce::Justification::centred);
     }
+
+    paintBands(g);
 }
 
 void SpectrumView::paintHistory(juce::Graphics& g)
@@ -449,7 +585,10 @@ void SpectrumView::paintOverlays(juce::Graphics& g)
         g.drawVerticalLine((int) std::round(hoverX), geo::y0, geo::y1);
         g.setColour(textLabel);
         g.setFont(font(12.f, Weight::Medium));
-        g.drawText(hzLong(hz) + kDot + noteName(hz), (int) W - 12 - 200 - (delta ? 200 : 0), 12, 200, 14, juce::Justification::right);
+        bool anyBand = false;
+        for (int b = 0; b < pid::kBands; ++b) anyBand = anyBand || proc.getReal(pid::band(b, pid::bandOn)) >= 0.5f;
+        const juce::String hint = anyBand || hoverNode ? juce::String() : "double-click: add band" + kDot;
+        g.drawText(hint + hzLong(hz) + kDot + noteName(hz), (int) W - 12 - 340 - (delta ? 200 : 0), 12, 340, 14, juce::Justification::right);
     }
     if (st.toastVisible()) {
         const auto f = font(12.5f, Weight::Medium);
@@ -470,19 +609,38 @@ void SpectrumView::mouseMove(const juce::MouseEvent& e)
 {
     hoverX = e.position.x;
     hoverNode = hitNode(e.position);
-    setMouseCursor(hoverNode ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::CrosshairCursor);
+    hoverBand = hoverNode ? -1 : hitBand(e.position);
+    setMouseCursor(hoverNode ? juce::MouseCursor::LeftRightResizeCursor
+                             : (hoverBand >= 0 ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::CrosshairCursor));
     repaint();
 }
 
 void SpectrumView::mouseDown(const juce::MouseEvent& e)
 {
     dragNode = hitNode(e.position);
-    if (dragNode) proc.getParam(dragNode == 1 ? pid::rangeLow : pid::rangeHigh)->beginChangeGesture();
+    dragBand = -1;
+    if (dragNode) { proc.getParam(dragNode == 1 ? pid::rangeLow : pid::rangeHigh)->beginChangeGesture(); return; }
+    const int b = hitBand(e.position);
+    if (b < 0) return;
+    if (e.mods.isPopupMenu()) { removeBand(b); hoverBand = -1; repaint(); return; }
+    dragBand = b;
+    proc.getParam(pid::band(b, pid::bandFreq))->beginChangeGesture();
+    proc.getParam(pid::band(b, pid::bandDepth))->beginChangeGesture();
 }
 
 void SpectrumView::mouseDrag(const juce::MouseEvent& e)
 {
     hoverX = e.position.x;
+    if (dragBand >= 0) {
+        const float hz = hzOfX(juce::jlimit(geo::x0, geo::x1, e.position.x));
+        float depth = depthOfY(e.position.y);
+        if (std::abs(depth) < 0.03f) depth = 0.f;   // snap to the centre line
+        const int fId = pid::band(dragBand, pid::bandFreq), dId = pid::band(dragBand, pid::bandDepth);
+        proc.getParam(fId)->setValueNotifyingHost(realToNorm(fId, juce::jlimit(20.f, 20000.f, hz)));
+        proc.getParam(dId)->setValueNotifyingHost(realToNorm(dId, depth * 100.f));
+        repaint();
+        return;
+    }
     if (!dragNode) return;
     float hz = hzOfX(juce::jlimit(geo::x0, geo::x1, e.position.x));
     const float lo = proc.getReal(pid::rangeLow), hi = proc.getReal(pid::rangeHigh);
@@ -499,7 +657,13 @@ void SpectrumView::mouseUp(const juce::MouseEvent&)
         proc.getParam(dragNode == 1 ? pid::rangeLow : pid::rangeHigh)->endChangeGesture();
         proc.historyCommit();
     }
+    if (dragBand >= 0) {
+        proc.getParam(pid::band(dragBand, pid::bandFreq))->endChangeGesture();
+        proc.getParam(pid::band(dragBand, pid::bandDepth))->endChangeGesture();
+        proc.historyCommit();
+    }
     dragNode = 0;
+    dragBand = -1;
 }
 
 void SpectrumView::mouseDoubleClick(const juce::MouseEvent& e)
@@ -508,7 +672,41 @@ void SpectrumView::mouseDoubleClick(const juce::MouseEvent& e)
         const int id = n == 1 ? pid::rangeLow : pid::rangeHigh;
         proc.setParamReal(id, paramDefs()[(size_t) id].def);
         proc.historyCommit();
+        return;
     }
+    if (view != View::Spectrum) return;
+    if (const int b = hitBand(e.position); b >= 0) {   // back to 0 %
+        setBand(b, pid::bandDepth, 0.f);
+        proc.historyCommit();
+        return;
+    }
+    if (e.position.x < geo::x0 || e.position.x > geo::x1 || e.position.y < geo::levelTop || e.position.y > geo::y1) return;
+    // add a band at the clicked spot: the first free one
+    for (int b = 0; b < pid::kBands; ++b) {
+        if (proc.getReal(pid::band(b, pid::bandOn)) >= 0.5f) continue;
+        float depth = depthOfY(e.position.y);
+        if (std::abs(depth) < 0.08f) depth = 0.f;
+        setBand(b, pid::bandFreq, juce::jlimit(20.f, 20000.f, hzOfX(e.position.x)));
+        setBand(b, pid::bandDepth, depth * 100.f);
+        setBand(b, pid::bandWidth, 1.f);
+        setBand(b, pid::bandOn, 1.f);
+        proc.historyCommit();
+        hoverBand = b;
+        repaint();
+        return;
+    }
+    st.showToast("All " + juce::String(pid::kBands) + " bands are in use. Right-click one to remove it.");
+}
+
+void SpectrumView::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
+{
+    const int b = hitBand(e.position);
+    if (b < 0 || w.deltaY == 0.f) return;
+    const float fine = e.mods.isCtrlDown() || e.mods.isCommandDown() ? 0.25f : 1.f;
+    const float cur = proc.getReal(pid::band(b, pid::bandWidth));
+    setBand(b, pid::bandWidth, juce::jlimit(0.1f, 4.f, cur * std::exp2((w.deltaY > 0.f ? 0.25f : -0.25f) * fine)));
+    proc.historyCommit();
+    repaint();
 }
 
 //==============================================================================================
@@ -614,15 +812,21 @@ void HarshnessStrip::paint(juce::Graphics& g)
     // legend
     struct Row { const char* text; int kind; juce::Colour c; };
     const Row rows[] = { { "Input", 0, inputIce }, { "Expected curve", 1, textSecondary }, { "Cut applied", 2, accent },
-                         { "Protected harmonics", 3, protectPurple }, { "Sidechain key", 0, keyCyan } };
+                         { "Protected harmonics", 3, protectPurple }, { "Sidechain key", 0, keyCyan },
+                         { "Bands: stronger / weaker", 4, accent } };
     g.setFont(font(11.5f, Weight::Regular));
-    float y = (float) r.getHeight() - 12.f - 5.f * 17.f;
+    float y = (float) r.getHeight() - 12.f - (float) std::size(rows) * 17.f;
     for (const auto& row : rows) {
         const float cy = y + 8.f;
         g.setColour(row.c);
         if (row.kind == 0) g.fillRect(12.f, cy - 1.f, 18.f, 2.f);
         else if (row.kind == 1) { for (int k = 0; k < 3; ++k) g.fillRect(12.f + (float) k * 7.f, cy - 1.f, 4.f, 2.f); }
         else if (row.kind == 2) { g.setColour(accent.withAlpha(0.4f)); g.fillRect(12.f, cy - 4.f, 18.f, 8.f); g.setColour(accent); g.fillRect(12.f, cy + 2.f, 18.f, 2.f); }
+        else if (row.kind == 4) {
+            g.fillRect(12.f, cy - 1.f, 9.f, 2.f);
+            g.setColour(protectPurple); g.fillRect(21.f, cy - 1.f, 9.f, 2.f);
+            g.setColour(textPrimary); g.drawEllipse(17.f, cy - 4.f, 8.f, 8.f, 1.3f);
+        }
         else g.fillRect(20.f, cy - 5.f, 2.f, 10.f);
         g.setColour(textSecondary);
         g.drawText(row.text, 40, (int) y, (int) W - 44, 16, juce::Justification::left);

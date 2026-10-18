@@ -1,5 +1,6 @@
 #include "TestMain.h"
 #include "engine/Params.h"
+#include "engine/Presets.h"
 #include <set>
 
 using namespace chiller;
@@ -62,4 +63,48 @@ CH_TEST(params_state_roundtrip)
     CH_CHECK_NEAR(s.real(pid::release), 250.0, 0.01);
     ParamState def;
     CH_CHECK_NEAR(def.real(pid::attack), 10.0, 1e-3);
+}
+
+CH_TEST(params_bands)
+{
+    for (int b = 0; b < pid::kBands; ++b) {
+        const std::string n = std::to_string(b + 1);
+        CH_CHECK(findParam("band" + n + "_on") == pid::band(b, pid::bandOn));
+        CH_CHECK(findParam("band" + n + "_freq") == pid::band(b, pid::bandFreq));
+        CH_CHECK(findParam("band" + n + "_depth") == pid::band(b, pid::bandDepth));
+        CH_CHECK(findParam("band" + n + "_width") == pid::band(b, pid::bandWidth));
+        ParamState s;
+        CH_CHECK(s.real(pid::band(b, pid::bandOn)) == 0.f);
+        CH_CHECK_NEAR(s.real(pid::band(b, pid::bandDepth)), 0.0, 1e-4);
+        CH_CHECK_NEAR(s.real(pid::band(b, pid::bandFreq)), kBandDefaultHz[b], 0.01 * kBandDefaultHz[b]);
+    }
+    CH_CHECK(pid::band(pid::kBands - 1, pid::bandWidth) == pid::count - 1);
+    CH_CHECK(!pid::isBandParam(pid::bypass) && pid::isBandParam(pid::bandBase));
+}
+
+CH_TEST(preset_values_roundtrip_and_keep_globals)
+{
+    ParamState a;
+    a.setReal(pid::threshold, 9.f);
+    a.setReal(pid::band(2, pid::bandOn), 1.f);
+    a.setReal(pid::band(2, pid::bandDepth), -60.f);
+    a.setReal(pid::band(2, pid::bandFreq), 3200.f);
+    a.setReal(pid::mix, 40.f);                                  // global: not part of a preset
+    const auto vals = presetValues(a);
+    for (const auto& [id, v] : vals) CH_CHECK(isPresetParam(id));
+    ParamState b;
+    b.setReal(pid::mix, 70.f);
+    b.setReal(pid::amount, 90.f);                               // owned, not in a: back to the preset's value
+    applyPresetValues(b, vals);
+    CH_CHECK_NEAR(b.real(pid::threshold), 9.0, 1e-3);
+    CH_CHECK_NEAR(b.real(pid::band(2, pid::bandDepth)), -60.0, 1e-3);
+    CH_CHECK_NEAR(b.real(pid::band(2, pid::bandFreq)), 3200.0, 0.5);
+    CH_CHECK(b.real(pid::band(2, pid::bandOn)) == 1.f);
+    CH_CHECK_NEAR(b.real(pid::amount), 50.0, 1e-3);
+    CH_CHECK_NEAR(b.real(pid::mix), 70.0, 1e-3);                // kept
+    // out-of-range values are clamped, unknown and global ids ignored
+    ParamState c;
+    applyPresetValues(c, { { pid::threshold, 99.f }, { pid::output, 12.f }, { -1, 3.f }, { pid::count + 5, 1.f } });
+    CH_CHECK_NEAR(c.real(pid::threshold), 24.0, 1e-3);
+    CH_CHECK_NEAR(c.real(pid::output), 0.0, 1e-3);
 }

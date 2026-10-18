@@ -52,6 +52,14 @@ std::vector<ParamDef> buildDefs()
     // ---- global ----
     choice(mode, "mode", "Mode", { "Live (low latency)", "Mix", "Master" }, 1);
     toggle(bypass, "bypass", "Bypass", false);
+    // ---- bands ----
+    for (int b = 0; b < kBands; ++b) {
+        const std::string n = std::to_string(b + 1);
+        toggle(band(b, bandOn), "band" + n + "_on", "Band " + n + " On", false);
+        set(band(b, bandFreq), "band" + n + "_freq", "Band " + n + " Freq", 20.f, 20000.f, kBandDefaultHz[b], Curve::Log, "Hz");
+        set(band(b, bandDepth), "band" + n + "_depth", "Band " + n + " Depth", -100.f, 100.f, 0.f, Curve::Lin, "%");
+        set(band(b, bandWidth), "band" + n + "_width", "Band " + n + " Width", 0.1f, 4.f, 1.f, Curve::Log, "oct");
+    }
     return d;
 }
 } // namespace

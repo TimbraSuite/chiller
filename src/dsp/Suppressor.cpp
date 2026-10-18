@@ -59,7 +59,7 @@ Suppressor::Suppressor(double sampleRate, int fftSize, TripleBuffer<UiFrame>* ui
         window[(size_t) i] = (float) (0.5 - 0.5 * std::cos(2.0 * std::numbers::pi * (double) i / (double) n));
     for (auto* v : { &inA, &inB, &kA, &kB, &outA, &outB, &zr, &zi }) v->assign((size_t) n, 0.f);
     for (auto* v : { &aRe, &aIm, &bRe, &bIm, &pA, &pB, &kpA, &kpB, &tRe0, &tIm0, &tRe1, &tIm1, &dbMain, &dbKey, &dbLin,
-                     &dbOwn[0], &dbOwn[1], &clipv, &capW, &M, &rangeW, &harmFactor, &hw, &aCoef, &rCoef, &gA, &gB })
+                     &dbOwn[0], &dbOwn[1], &clipv, &capW, &bandW, &bandSens, &M, &rangeW, &harmFactor, &hw, &aCoef, &rCoef, &gA, &gB })
         v->assign((size_t) nb, 0.f);
     std::fill(harmFactor.begin(), harmFactor.end(), 1.f);
     for (int k = 0; k < nb; ++k)
@@ -140,6 +140,7 @@ void Suppressor::setParams(const SuppressorParams& np)
     if (first || P.focusOct != old.focusOct) updateFocus();
     if (first || P.rangeLowHz != old.rangeLowHz || P.rangeHighHz != old.rangeHighHz) updateRange();
     if (first || P.attackMs != old.attackMs || P.releaseMs != old.releaseMs || P.speedTilt != old.speedTilt) updateSpeed();
+    if (first || P.bands != old.bands) updateBands();
 }
 
 void Suppressor::updateFocus()
@@ -164,6 +165,16 @@ void Suppressor::updateRange()
         const float fRes = resolvedFromHz(n, sr);                     // lowest frequency this STFT size can separate
         rangeW[(size_t) k] = 1.f / (1.f + a2 * a2) / (1.f + b2 * b2)  // 2nd-order-ish rolloff on each side
                              * smoothstep(0.5f * fRes, fRes, (float) k * binHz);
+    }
+}
+
+void Suppressor::updateBands()
+{
+    bandsActive = anyBandActive(P.bands);
+    for (int k = 0; k < nb; ++k) {
+        const auto e = bandEffect(P.bands, std::max((float) k, 0.25f) * binHz);
+        bandW[(size_t) k] = e.weight;
+        bandSens[(size_t) k] = e.sensDb;
     }
 }
 
@@ -459,14 +470,16 @@ void Suppressor::runPipe(Pipe& p, const float* Lraw, const float* harm)
     // target reduction
     const float thr = P.thresholdDb, amt = P.amount, mc = P.maxCutDb;
     for (int k = 0; k < nb; ++k) {
-        const float ex = L[k] - p.E[(size_t) k] - thr;
+        const float ex = L[k] - p.E[(size_t) k] - thr + (bandsActive ? bandSens[(size_t) k] : 0.f);
         float g = 0.f;
         if (ex > 0.f) {
             g = amt * ex * transFactor;
             if (harm) g *= harm[k];
             // Range / resolvability weight scales the cut after the Max Cut cap: a strong tone in a region the STFT cannot resolve (or outside
-            // Range) must not be cut by the full cap just because its excess is huge.
+            // Range) must not be cut by the full cap just because its excess is huge. A band's weight scales the capped cut the same way, so
+            // -50 % halves even a cut that sits at Max Cut, and a boosted band may go past Max Cut.
             g = std::min(g, mc * capW[(size_t) k]) * rangeW[(size_t) k];
+            if (bandsActive) g *= bandW[(size_t) k];
         }
         p.Gt[(size_t) k] = g;
     }

@@ -71,8 +71,9 @@ Presets are plain JSON files in [`presets/community/`](presets/community). One f
 ```
 
 `params` keys are parameter ids from `src/engine/Params.cpp`, values are in real units (dB, %, ms, Hz, octaves);
-omitted parameters keep their defaults. Presets are loadable once the preset system lands in v0.2; until then you
-can already submit them. Only submit presets you made yourself, and say what source material they suit.
+omitted parameters keep their defaults. Since v0.2 Chiller loads these files from `Documents/Chiller/Presets`
+("Save preset..." in the preset menu writes the same format, and "Open presets folder" shows where it is); `mode` is
+informational, loading a preset never changes the mode. Only submit presets you made yourself, and say what source material they suit.
 
 ## Reporting bugs
 

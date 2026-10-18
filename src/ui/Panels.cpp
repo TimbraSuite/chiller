@@ -6,6 +6,8 @@ using namespace chiller;
 namespace chui {
 
 static constexpr int kKnobW = 58, kKnobH = 70;
+// preset menu item ids
+static constexpr int kPresetIdFactory = 1, kPresetIdUser = 100, kPresetIdSave = 900, kPresetIdFolder = 901;
 
 //==============================================================================================
 void LearnButton::paintOverChildren(juce::Graphics& g)
@@ -23,13 +25,21 @@ TopBar::TopBar(ChillerProcessor& p, UiState& s) : proc(p), st(s)
         addAndMakeVisible(*c);
     prev.setTooltip("Previous preset");
     next.setTooltip("Next preset");
-    int id = 1;
-    for (const auto& pr : factoryPresets()) preset.addItem(pr.name, id++);
-    preset.setTooltip("Factory presets (they set the detection, speed and protection controls; output and mode stay as they are)");
+    rebuildPresetMenu();
+    preset.setTooltip("Factory and user presets (they set the detection, speed, protection and band controls; output and mode stay as they are). "
+                      "Save preset... stores the current settings in Documents/Chiller/Presets");
     preset.setJustificationType(juce::Justification::centredLeft);
     preset.onChange = [this] {
-        const int i = preset.getSelectedItemIndex();
-        if (i >= 0) proc.loadPreset(i);
+        const int id = preset.getSelectedId(), nf = (int) factoryPresets().size();
+        if (id >= kPresetIdFactory && id < kPresetIdFactory + nf) proc.loadPreset(id - kPresetIdFactory);
+        else if (id >= kPresetIdUser && id < kPresetIdSave) proc.loadPreset(nf + id - kPresetIdUser);
+        else if (id == kPresetIdSave) { syncPresetCombo(); savePresetDialog(); return; }
+        else if (id == kPresetIdFolder) {
+            auto folder = ChillerProcessor::userPresetFolder();
+            folder.createDirectory();
+            folder.revealToUser();
+        }
+        syncPresetCombo();
     };
     prev.onClick = [this] { proc.loadPreset(proc.presetIndex - 1); syncPresetCombo(); };
     next.onClick = [this] { proc.loadPreset(proc.presetIndex + 1); syncPresetCombo(); };
@@ -68,7 +78,55 @@ TopBar::TopBar(ChillerProcessor& p, UiState& s) : proc(p), st(s)
     tick();
 }
 
-void TopBar::syncPresetCombo() { preset.setSelectedItemIndex(proc.presetIndex, juce::dontSendNotification); }
+void TopBar::rebuildPresetMenu()
+{
+    proc.refreshUserPresets();
+    shownUserPresets = proc.getUserPresets();
+    preset.clear(juce::dontSendNotification);
+    int id = kPresetIdFactory;
+    for (const auto& pr : factoryPresets()) preset.addItem(pr.name, id++);
+    if (!shownUserPresets.isEmpty()) {
+        preset.addSeparator();
+        preset.addSectionHeading("User");
+        for (int i = 0; i < shownUserPresets.size() && kPresetIdUser + i < kPresetIdSave; ++i)
+            preset.addItem(shownUserPresets[i].getFileNameWithoutExtension(), kPresetIdUser + i);
+    }
+    preset.addSeparator();
+    preset.addItem(juce::String::fromUTF8("Save preset\xe2\x80\xa6"), kPresetIdSave);
+    preset.addItem("Open presets folder", kPresetIdFolder);
+    syncPresetCombo();
+}
+
+void TopBar::syncPresetCombo()
+{
+    const int nf = (int) factoryPresets().size();
+    const int id = proc.presetIndex < nf ? kPresetIdFactory + proc.presetIndex : kPresetIdUser + proc.presetIndex - nf;
+    if (preset.indexOfItemId(id) >= 0 && preset.getItemText(preset.indexOfItemId(id)) == proc.presetName)
+        preset.setSelectedId(id, juce::dontSendNotification);
+    else if (preset.getText() != proc.presetName)
+        preset.setText(proc.presetName, juce::dontSendNotification);
+}
+
+void TopBar::savePresetDialog()
+{
+    auto* w = new juce::AlertWindow("Save preset", "Name of the preset (saved in Documents/Chiller/Presets; the same name replaces it)",
+                                    juce::MessageBoxIconType::NoIcon, this);
+    w->addTextEditor("name", proc.presetName);
+    w->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
+    w->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<TopBar> self(this);
+    w->enterModalState(true, juce::ModalCallbackFunction::create([self, w](int result) {
+        if (self == nullptr || result != 1) return;
+        juce::String err;
+        const auto name = w->getTextEditorContents("name");
+        if (self->proc.saveUserPreset(name, err)) {
+            self->rebuildPresetMenu();
+            self->st.showToast("Saved preset " + name.trim());
+        } else {
+            self->st.showToast(err);
+        }
+    }), true);
+}
 
 void TopBar::resized()
 {
@@ -133,7 +191,14 @@ void TopBar::tick()
     abCopy.setButtonText(proc.abActive() == 0 ? "A>B" : "B>A");
     undo.setEnabled(proc.canUndo());
     redo.setEnabled(proc.canRedo());
-    if (!preset.isPopupActive()) syncPresetCombo();
+    if (!preset.isPopupActive()) {
+        if (++presetScanTicks >= 90) {   // pick up presets added or removed outside the plugin (about every 3 s)
+            presetScanTicks = 0;
+            proc.refreshUserPresets();
+            if (proc.getUserPresets() != shownUserPresets) rebuildPresetMenu();
+        }
+        syncPresetCombo();
+    }
 
     if (learnState == LearnState::Armed && hostIsPlaying()) beginListening();
     if (learnState == LearnState::Listening) {

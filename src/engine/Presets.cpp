@@ -1,4 +1,5 @@
 #include "Presets.h"
+#include <algorithm>
 
 namespace chiller {
 
@@ -26,17 +27,37 @@ const std::vector<Preset>& factoryPresets()
     return presets;
 }
 
+bool isPresetParam(int id)
+{
+    return !(id == pid::mode || id == pid::bypass || id == pid::stereoMode || id == pid::scKey || id == pid::delta ||
+             id == pid::mix || id == pid::trim || id == pid::output || id == pid::autoGain);
+}
+
+void applyPresetValues(ParamState& state, const std::vector<std::pair<int, float>>& values)
+{
+    ParamState def;
+    for (int i = 0; i < pid::count; ++i)
+        if (isPresetParam(i)) state[i] = def[i];
+    for (const auto& [id, v] : values) {
+        if (id < 0 || id >= pid::count || !isPresetParam(id)) continue;
+        const auto& d = paramDefs()[(size_t) id];
+        state.setReal(id, std::clamp(v, d.min, d.max));
+    }
+}
+
+std::vector<std::pair<int, float>> presetValues(const ParamState& state)
+{
+    std::vector<std::pair<int, float>> out;
+    for (int i = 0; i < pid::count; ++i)
+        if (isPresetParam(i)) out.emplace_back(i, state.real(i));
+    return out;
+}
+
 void applyPreset(ParamState& state, int index)
 {
     const auto& ps = factoryPresets();
     if (index < 0 || index >= (int) ps.size()) return;
-    ParamState def;
-    for (int i = 0; i < pid::count; ++i) {
-        if (i == pid::mode || i == pid::bypass || i == pid::stereoMode || i == pid::scKey || i == pid::delta ||
-            i == pid::mix || i == pid::trim || i == pid::output || i == pid::autoGain) continue;
-        state[i] = def[i];
-    }
-    for (const auto& [id, v] : ps[(size_t) index].values) state.setReal(id, v);
+    applyPresetValues(state, ps[(size_t) index].values);
 }
 
 } // namespace chiller
