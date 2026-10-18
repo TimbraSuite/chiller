@@ -56,7 +56,14 @@ public:
     chiller::ParamState captureState() const;
     void applyState(const chiller::ParamState&);        // sets every parameter as a host gesture
     void setParamReal(int id, float real);              // one parameter, as a gesture
-    void loadPreset(int index);
+    void loadPreset(int index);                         // 0..numPresets()-1: factory presets first, then user presets (wraps)
+    // ---- user presets: JSON files (the community preset format, see CONTRIBUTING.md) in Documents/Chiller/Presets ----
+    static juce::File userPresetFolder();
+    void refreshUserPresets();                          // rescans the folder (message thread)
+    const juce::Array<juce::File>& getUserPresets() const { return userPresets; }
+    int numPresets() const { return (int) chiller::factoryPresets().size() + userPresets.size(); }
+    bool saveUserPreset(const juce::String& name, juce::String& error);
+    bool loadUserPreset(const juce::File& file, juce::String& error);
     // undo / redo of user edits: controls call historyCommit() when a gesture ends
     void historyCommit();
     bool canUndo() const { return histIdx > 0; }
@@ -83,6 +90,7 @@ private:
     float eDry = 0.f, eWet = 0.f, eCoef = 0.001f;
     std::vector<chiller::ParamState> hist;
     int histIdx = 0;
+    juce::Array<juce::File> userPresets;
     chiller::ParamState abState[2];
     bool abValid[2] = { true, false };
     int abSlot = 0;

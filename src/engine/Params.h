@@ -31,9 +31,18 @@ enum Id : int {
     mix, trim, output, delta, autoGain,
     // global
     mode, bypass,
-    count
+    // bands: kBands x { on, freq, depth, width } from here (see band())
+    bandBase,
+    count = bandBase + 6 * 4
 };
+constexpr int kBands = 6;
+enum BandField : int { bandOn = 0, bandFreq = 1, bandDepth = 2, bandWidth = 3, bandFields = 4 };
+constexpr int band(int index, int field) { return bandBase + index * bandFields + field; }
+inline bool isBandParam(int id) { return id >= bandBase && id < count; }
 } // namespace pid
+
+// Default centre frequencies of the bands (spread so each node starts in its own region).
+constexpr float kBandDefaultHz[pid::kBands] = { 150.f, 400.f, 1000.f, 2500.f, 5000.f, 10000.f };
 
 // Parameter-state version, bump when ids change meaning.
 constexpr int kStateVersion = 2;

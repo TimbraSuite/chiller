@@ -16,17 +16,17 @@ Plugin shell, no suppression yet.
 
 The first version that actually suppresses resonances. It also pulled forward parts of the later phases: M/S and Link,
 sidechain key, Master mode, harmonic and transient protection, Budget, presets, A/B, undo/redo, Auto-gain, Speed Tilt,
-a simple LEARN, and the harshness strip. Still open from those phases: bands with per-band overrides, user presets,
-Unmask, Freeze-to-EQ.
+a simple LEARN, and the harshness strip. Still open from those phases: Unmask, Freeze-to-EQ.
 
 - Mix-mode engine: spectral-envelope detection, per-bin gain computation, smoothing
 - Main controls live: Threshold, Amount, Focus, Attack, Release, Max Cut, Range Low/High, Mix
 - **Delta** listen mode returns the removed signal
 - **Explain view** overlays detected resonances and applied reduction on the input spectrum
 
-## Shaping: v0.2
+## Shaping: v0.2 (done, see docs/release-notes/v0.2.0-alpha.md)
 
-- Bands with per-band overrides
+- **Bands with per-band overrides**: six draggable nodes in the Explain view set the processing depth per region (done in v0.2)
+- **User presets** in the community JSON format (done in v0.2)
 - L/R and M/S processing with Link
 - Sidechain **key** input (detect from the sidechain, apply to the main signal)
 - **Master** mode (long window, higher resolution)

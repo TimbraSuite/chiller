@@ -2,6 +2,7 @@
 // The resonance suppressor core for one STFT size: stereo (L/R or M/S) Hann/WOLA analysis-synthesis,
 // per-bin detection against an "expected" spectral envelope, protection, budget, time smoothing, and
 // per-bin gain. Real-time safe: everything is allocated in the constructor.
+#include "Bands.h"
 #include "Fft.h"
 #include "Telemetry.h"
 #include <vector>
@@ -23,6 +24,7 @@ struct SuppressorParams {
     float displayMix = 1.f;       // only scales what the UI reports
     bool midSide = false;
     bool scKey = false;           // detect from the sidechain input when one is supplied
+    Bands bands {};               // per-band depth (see Bands.h); all off = no effect
 };
 
 class Suppressor {
@@ -48,13 +50,14 @@ private:
     void updateFocus();
     void updateRange();
     void updateSpeed();
+    void updateBands();
     float meanOver(const float* v) const;
 
     double sr;
     int n, nb, hop, mask, writePos = 0, hopCount = 0, frameCount = 0, publishEvery = 1;
     float hopMs, binHz, norm2, outScale;
     SuppressorParams P, applied;
-    bool paramsInit = false, scHave = false;
+    bool paramsInit = false, scHave = false, bandsActive = false;
     Fft fft;
     std::vector<float> window;
     std::vector<float> inA, inB, kA, kB, outA, outB;     // rings
@@ -67,7 +70,7 @@ private:
     std::vector<double> ps;
     std::vector<int> pkIdx;
     int partialMaxBins = 20;
-    std::vector<float> clipv, M, rangeW, capW, harmFactor, hw, aCoef, rCoef, gA, gB;
+    std::vector<float> clipv, M, rangeW, capW, bandW, bandSens, harmFactor, hw, aCoef, rCoef, gA, gB;
     std::vector<int> lo, hi, loW, hiW;
     int budgetLo = 0, budgetHi = 0, pitchBins = 0, fluxLo = 0;
     // pitch

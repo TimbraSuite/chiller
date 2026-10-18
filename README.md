@@ -4,9 +4,9 @@
 sound and tames them dynamically, so a mix or a master can sit smoother without dulling it. It is an audio
 **effect** plugin: VST3, CLAP, Audio Unit (macOS), LV2 (Linux) and a standalone app.
 
-> **Status: v0.1.0 alpha.** The suppression engine works: per-bin resonance detection against an expected curve,
+> **Status: v0.2.0 alpha.** The suppression engine works: per-bin resonance detection against an expected curve,
 > protection (harmonics, transients, budget), Live / Mix / Master modes, M/S and sidechain key, and the Explain view.
-> It has had no hands-on host testing on Windows and macOS yet. Release notes: [docs/release-notes/v0.1.0-alpha.md](docs/release-notes/v0.1.0-alpha.md).
+> It has had no hands-on host testing on Windows and macOS yet. Release notes: [v0.2.0](docs/release-notes/v0.2.0-alpha.md), [v0.1.0](docs/release-notes/v0.1.0-alpha.md).
 > Roadmap: [docs/PLAN.md](docs/PLAN.md).
 
 ## What works today
@@ -18,7 +18,8 @@ sound and tames them dynamically, so a mix or a master can sit smoother without 
 - Output: latency-compensated Mix, Trim, Output, **Delta** (listen to what is removed), Auto-gain, soft Bypass
 - **Explain view**: input spectrum, expected curve, applied cut, labelled peaks, harmonic ticks, history heat map,
   harshness in/out and average reduction vs budget
-- Six factory presets, A/B compare, undo/redo, LEARN
+- **Bands**: six draggable nodes on the spectrum make the processing stronger or weaker per region (frequency, depth -100 to +100 %, width)
+- Six factory presets, **user presets** (saved as JSON in Documents/Chiller/Presets), A/B compare, undo/redo, LEARN
 
 ## Install
 

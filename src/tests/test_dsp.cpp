@@ -343,6 +343,7 @@ CH_TEST(no_nan_or_denormals_under_parameter_fuzzing)
             p.attackMs = std::exp(u(0.f, std::log(100.f))); p.releaseMs = std::exp(u(std::log(10.f), std::log(500.f)));
             p.speedTilt = u(-1.f, 1.f); p.transientPass = u(0.f, 1.f); p.harmonicProtect = u(0.f, 1.f); p.budgetDb = u(0.f, 12.f);
             p.link = u(0.f, 1.f); p.midSide = iter % 2 == 0; p.scKey = iter % 3 == 0; p.displayMix = u(0.f, 1.f);
+            for (auto& bd : p.bands) bd = { u(0.f, 1.f) > 0.5f, std::exp(u(std::log(20.f), std::log(20000.f))), u(-1.f, 1.f), std::exp(u(std::log(0.1f), std::log(4.f))) };
             e.setMode((Mode) (iter % 3));
             e.setParams(p);
             const int n = 6000 + (int) (rng() % 3000);
@@ -567,4 +568,107 @@ CH_TEST(harmonic_protect_zero_restores_the_classic_detector)
     const double d = bandDbAvg(l, (int) (1.0 * sr), 4096, 24, sr, 4000.0, 8000.0) - bandDbAvg(x, (int) (1.0 * sr) - lat, 4096, 24, sr, 4000.0, 8000.0);
     CH_INFO("protect 0: 4-8 kHz changed by %.2f dB\n", d);
     CH_CHECK(d < -2.0);
+}
+
+// ---- bands ---------------------------------------------------------------------------------------------
+CH_TEST(band_curve_shape)
+{
+    Band b;
+    b.on = true; b.hz = 2000.f; b.depth = -1.f; b.widthOct = 1.f;
+    CH_CHECK_NEAR(bandBell(b, 2000.f), 1.0, 1e-6);
+    CH_CHECK_NEAR(bandBell(b, 2000.f * std::sqrt(2.f)), 0.5, 1e-4);   // half height at +- width / 2
+    CH_CHECK(bandBell(b, 8000.f) < 0.01f);
+    Bands bs {};
+    bs[0] = b;
+    CH_CHECK_NEAR(bandEffect(bs, 2000.f).weight, 0.0, 1e-6);           // -100 %: off at the centre
+    CH_CHECK_NEAR(bandEffect(bs, 200.f).weight, 1.0, 1e-3);
+    bs[0].depth = 1.f;
+    CH_CHECK_NEAR(bandEffect(bs, 2000.f).weight, 1.0 + kBandBoost, 1e-6);
+    CH_CHECK_NEAR(bandEffect(bs, 2000.f).sensDb, kBandSensDb, 1e-6);
+    bs[0].on = false;
+    CH_CHECK(!anyBandActive(bs));
+    CH_CHECK_NEAR(bandEffect(bs, 2000.f).weight, 1.0, 1e-9);
+}
+
+static std::vector<float> runMix(const std::vector<float>& x, const SuppressorParams& p, int& lat)
+{
+    Engine e;
+    e.prepare(48000.0, Mode::Mix);
+    e.setParams(p);
+    auto l = x, r = x;
+    run(e, l, r);
+    lat = e.latencySamples();
+    return l;
+}
+
+CH_TEST(disabled_bands_change_nothing)
+{
+    auto x = noiseWithResonances(48000 * 3, 48000.0, { { 2000.0, 0.02f }, { 5000.0, 0.015f } });
+    SuppressorParams p;
+    p.amount = 1.f; p.maxCutDb = 30.f; p.budgetDb = 12.f;
+    int lat = 0;
+    const auto a = runMix(x, p, lat);
+    for (auto& b : p.bands) { b.on = false; b.depth = -1.f; b.hz = 2000.f; }   // depth set but switched off
+    p.bands[1].on = true; p.bands[1].depth = 0.f;                               // on but at 0 %
+    const auto b = runMix(x, p, lat);
+    double maxErr = 0.0;
+    for (size_t i = 0; i < a.size(); ++i) maxErr = std::max(maxErr, (double) std::abs(a[i] - b[i]));
+    CH_INFO("max difference %.3g\n", maxErr);
+    CH_CHECK(maxErr == 0.0);
+}
+
+CH_TEST(negative_band_spares_its_region_only)
+{
+    const double sr = 48000.0;
+    auto x = noiseWithResonances(48000 * 4, sr, { { 2000.0, 0.02f }, { 5000.0, 0.02f } });
+    SuppressorParams p;
+    p.amount = 1.f; p.maxCutDb = 30.f; p.budgetDb = 12.f;
+    int lat = 0;
+    const auto plain = runMix(x, p, lat);
+    p.bands[0] = { true, 2000.f, -1.f, 0.5f };
+    const auto spared = runMix(x, p, lat);
+    const double r2Plain = attenuationDb(x, plain, lat, sr, 1950.0, 2050.0), r2 = attenuationDb(x, spared, lat, sr, 1950.0, 2050.0);
+    const double r5Plain = attenuationDb(x, plain, lat, sr, 4900.0, 5100.0), r5 = attenuationDb(x, spared, lat, sr, 4900.0, 5100.0);
+    CH_INFO("2 kHz: %.2f dB -> %.2f dB with a -100 %% band; 5 kHz: %.2f -> %.2f dB\n", r2Plain, r2, r5Plain, r5);
+    CH_CHECK(r2Plain < -5.0);
+    CH_CHECK(r2 > -0.5);                       // the band switches the cut off at its centre
+    CH_CHECK(std::abs(r5 - r5Plain) < 1.0);    // the other resonance is still cut as before
+}
+
+CH_TEST(positive_band_catches_a_mild_resonance)
+{
+    const double sr = 48000.0;
+    // A mild resonance that sits just below the threshold, so the default setting leaves it alone.
+    auto x = noiseWithResonances(48000 * 4, sr, { { 3000.0, 0.008f } });
+    SuppressorParams p;
+    p.amount = 1.f; p.maxCutDb = 30.f; p.budgetDb = 12.f; p.thresholdDb = 12.f;
+    int lat = 0;
+    const auto plain = runMix(x, p, lat);
+    p.bands[2] = { true, 3000.f, 1.f, 1.f };
+    const auto boosted = runMix(x, p, lat);
+    const double a = attenuationDb(x, plain, lat, sr, 2950.0, 3050.0), b = attenuationDb(x, boosted, lat, sr, 2950.0, 3050.0);
+    const double away = attenuationDb(x, boosted, lat, sr, 300.0, 1200.0);
+    CH_INFO("3 kHz: %.2f dB plain, %.2f dB with a +100 %% band; 300-1200 Hz %.2f dB\n", a, b, away);
+    CH_CHECK(a > -1.0);
+    CH_CHECK(b < a - 3.0);
+    CH_CHECK(std::abs(away) < 1.0);
+}
+
+CH_TEST(band_can_exceed_max_cut_only_when_boosted)
+{
+    const double sr = 48000.0;
+    auto x = noiseWithResonances(48000 * 4, sr, { { 2000.0, 0.08f } });
+    SuppressorParams p;
+    p.amount = 1.f; p.maxCutDb = 6.f; p.budgetDb = 12.f;
+    int lat = 0;
+    const double capped = attenuationDb(x, runMix(x, p, lat), lat, sr, 1950.0, 2050.0);
+    p.bands[0] = { true, 2000.f, 1.f, 1.f };
+    const double boosted = attenuationDb(x, runMix(x, p, lat), lat, sr, 1950.0, 2050.0);
+    p.bands[0].depth = -0.5f;
+    const double halved = attenuationDb(x, runMix(x, p, lat), lat, sr, 1950.0, 2050.0);
+    CH_INFO("Max Cut 6 dB: %.2f dB plain, %.2f dB boosted, %.2f dB at -50 %%\n", capped, boosted, halved);
+    CH_CHECK(capped > -7.0);
+    CH_CHECK(boosted < capped - 1.5);
+    CH_CHECK(boosted > -6.0 * (1.0 + kBandBoost) - 1.0);
+    CH_CHECK(halved > capped + 1.5);
 }

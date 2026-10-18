@@ -6,7 +6,7 @@ if (APPLE AND NOT CMAKE_OSX_ARCHITECTURES)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS architectures" FORCE)
 endif()
 
-project(Chiller VERSION 0.1.0 LANGUAGES C CXX)
+project(Chiller VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,6 +22,7 @@ set(CH_DSP_GLOBS "src/dsp/*.cpp;src/engine/*.cpp" CACHE STRING "Globs (recursive
 file(GLOB_RECURSE CH_DSP_SOURCES CONFIGURE_DEPENDS ${CH_DSP_GLOBS})
 add_library(chiller_dsp STATIC src/dsp/DspStub.cpp ${CH_DSP_SOURCES})
 target_include_directories(chiller_dsp PUBLIC src)
+target_compile_definitions(chiller_dsp PUBLIC CH_VERSION="${PROJECT_VERSION}")
 set_target_properties(chiller_dsp PROPERTIES POSITION_INDEPENDENT_CODE ON)   # linked into shared plugin modules (Linux)
 if (MSVC)
     target_compile_options(chiller_dsp PRIVATE /W4 /fp:fast /wd4100 /wd4244 /wd4305)

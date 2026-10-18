@@ -1,5 +1,5 @@
 // Developer tool: renders the Chiller editor to a PNG without a host (software renderer).
-//   chiller_uishot out.png [scale] [--history] [--delta] [--key] [--mode=live|mix|master]
+//   chiller_uishot out.png [scale] [--history] [--delta] [--key] [--bands] [--mode=live|mix|master]
 // It feeds the processor a synthetic signal (pink-ish noise, a harmonic tone and a few resonances) so the
 // spectrum, the cut and the meters have content.
 #include "PluginEditor.h"
@@ -14,12 +14,13 @@ int main(int argc, char** argv)
     const juce::ScopedJuceInitialiser_GUI init;
     const juce::File out = argc > 1 ? juce::File::getCurrentWorkingDirectory().getChildFile(argv[1]) : juce::File("chiller-ui.png");
     float scale = 1.f;
-    bool history = false, delta = false, key = false;
+    bool history = false, delta = false, key = false, bands = false;
     int mode = 1;
     for (int i = 2; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--history")) history = true;
         else if (!std::strcmp(argv[i], "--delta")) delta = true;
         else if (!std::strcmp(argv[i], "--key")) key = true;
+        else if (!std::strcmp(argv[i], "--bands")) bands = true;
         else if (!std::strcmp(argv[i], "--mode=live")) mode = 0;
         else if (!std::strcmp(argv[i], "--mode=master")) mode = 2;
         else if (std::atof(argv[i]) > 0.0) scale = (float) std::atof(argv[i]);
@@ -38,6 +39,13 @@ int main(int argc, char** argv)
     proc.setParamReal(chiller::pid::rangeHigh, 17500.f);
     if (delta) proc.setParamReal(chiller::pid::delta, 1.f);
     if (key) proc.setParamReal(chiller::pid::scKey, 1.f);
+    if (bands) {   // one protected region and one boosted region
+        using namespace chiller::pid;
+        proc.setParamReal(band(0, bandOn), 1.f); proc.setParamReal(band(0, bandFreq), 1250.f);
+        proc.setParamReal(band(0, bandDepth), -70.f); proc.setParamReal(band(0, bandWidth), 1.2f);
+        proc.setParamReal(band(1, bandOn), 1.f); proc.setParamReal(band(1, bandFreq), 5800.f);
+        proc.setParamReal(band(1, bandDepth), 60.f); proc.setParamReal(band(1, bandWidth), 0.8f);
+    }
     const int block = 512;
     proc.prepareToPlay(48000.0, block);
 

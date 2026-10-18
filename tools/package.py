@@ -1,6 +1,6 @@
 """Package a Chiller build into a release zip.
 
-  python tools/package.py --platform windows|macos|linux --version 0.1.0 --artefacts build/Chiller_artefacts/Release --out dist
+  python tools/package.py --platform windows|macos|linux --version 0.2.0 --artefacts build/Chiller_artefacts/Release --out dist
 
 Output: dist/Chiller-<version>-<win64|macos|linux>.zip
 Unix file modes are preserved in the zip, so macOS bundles and the Linux standalone keep their executable bits.
@@ -36,7 +36,7 @@ Then rescan plug-ins in your DAW. Chiller appears as an effect.
 Standalone
   Run Chiller.exe (choose your audio device under Options).
 
-Alpha: the suppression engine works, but expect rough edges. See docs/release-notes/v0.1.0-alpha.md
+Alpha: the suppression engine works, but expect rough edges. See docs/release-notes/v0.2.0-alpha.md
 Roadmap: {repo}/blob/main/docs/PLAN.md
 Bugs & feedback:    {repo}/issues
 
@@ -65,7 +65,7 @@ MANUAL INSTALL (from this zip)
     xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/*/Chiller.* ~/Applications/Chiller.app /Applications/Chiller.app 2>/dev/null; killall -9 AudioComponentRegistrar 2>/dev/null; true
 
 """ + ABLETON + """
-Alpha: the suppression engine works, but expect rough edges. See docs/release-notes/v0.1.0-alpha.md
+Alpha: the suppression engine works, but expect rough edges. See docs/release-notes/v0.2.0-alpha.md
 Roadmap: {repo}/blob/main/docs/PLAN.md
 Bugs & feedback:    {repo}/issues
 
@@ -82,7 +82,7 @@ Copy each format to your plug-in folder, then rescan plug-ins in your DAW:
   Chiller.lv2   ->  ~/.lv2/
   Chiller       ->  anywhere (standalone app: chmod +x Chiller)
 
-Alpha: the suppression engine works, but expect rough edges. See docs/release-notes/v0.1.0-alpha.md
+Alpha: the suppression engine works, but expect rough edges. See docs/release-notes/v0.2.0-alpha.md
 Roadmap: {repo}/blob/main/docs/PLAN.md
 Bugs & feedback:    {repo}/issues
 

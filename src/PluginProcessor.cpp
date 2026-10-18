@@ -59,6 +59,11 @@ juce::String chFormat(int id, float norm, bool pretty)
         return juce::String(d.choices[(size_t) i]);
     }
     if (id == pid::speedTilt) return (r > 0.005f ? "+" : "") + juce::String(r, 2);
+    if (pid::isBandParam(id)) {
+        const int field = (id - pid::bandBase) % pid::bandFields;
+        if (field == pid::bandDepth) return (r >= 0.5f ? "+" : "") + juce::String(r, 0) + " %";
+        if (field == pid::bandWidth) return juce::String(r, 2) + " oct";
+    }
     return fmtReal(r, juce::String(d.unit), pretty);
 }
 
@@ -102,6 +107,7 @@ ChillerProcessor::ChillerProcessor()
     }
     hist.push_back(captureState());
     abState[0] = abState[1] = hist.back();
+    refreshUserPresets();
 }
 
 bool ChillerProcessor::isBusesLayoutSupported(const BusesLayout& l) const
@@ -166,6 +172,13 @@ static dsp::SuppressorParams suppressorParams(const ChillerProcessor& p)
     s.displayMix = p.getReal(pid::mix) / 100.f * (1.f - p.getReal(pid::bypass));
     s.midSide = p.getReal(pid::stereoMode) >= 0.5f;
     s.scKey = p.getReal(pid::scKey) >= 0.5f;
+    for (int b = 0; b < pid::kBands; ++b) {
+        auto& bd = s.bands[(size_t) b];
+        bd.on = p.getReal(pid::band(b, pid::bandOn)) >= 0.5f;
+        bd.hz = p.getReal(pid::band(b, pid::bandFreq));
+        bd.depth = p.getReal(pid::band(b, pid::bandDepth)) / 100.f;
+        bd.widthOct = p.getReal(pid::band(b, pid::bandWidth));
+    }
     return s;
 }
 
@@ -283,15 +296,75 @@ void ChillerProcessor::setParamReal(int id, float real)
 
 void ChillerProcessor::loadPreset(int index)
 {
-    const int n = (int) factoryPresets().size();
+    const int nf = (int) factoryPresets().size(), n = numPresets();
     if (n == 0) return;
     index = ((index % n) + n) % n;
+    if (index >= nf) {
+        juce::String err;
+        if (loadUserPreset(userPresets[index - nf], err)) presetIndex = index;
+        return;
+    }
     auto s = captureState();
     applyPreset(s, index);
     applyState(s);
     presetIndex = index;
     presetName = factoryPresets()[(size_t) index].name;
     historyCommit();
+}
+
+juce::File ChillerProcessor::userPresetFolder()
+{
+    return juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile("Chiller").getChildFile("Presets");
+}
+
+void ChillerProcessor::refreshUserPresets()
+{
+    auto files = userPresetFolder().findChildFiles(juce::File::findFiles, false, "*.json");
+    files.sort();   // juce::File compares by full path: alphabetical
+    userPresets = files;
+}
+
+bool ChillerProcessor::saveUserPreset(const juce::String& name, juce::String& error)
+{
+    const auto clean = name.trim();
+    if (clean.isEmpty()) { error = "Give the preset a name"; return false; }
+    auto folder = userPresetFolder();
+    if (!folder.createDirectory()) { error = "Could not create " + folder.getFullPathName(); return false; }
+    auto* params = new juce::DynamicObject();
+    const auto& defs = paramDefs();
+    for (const auto& [id, v] : presetValues(captureState()))
+        params->setProperty(juce::Identifier(defs[(size_t) id].id), (double) v);
+    auto* root = new juce::DynamicObject();
+    root->setProperty("name", clean);
+    root->setProperty("author", "");
+    root->setProperty("chillerVersion", CH_VERSION);
+    root->setProperty("mode", juce::String(dsp::modeName(activeMode)));
+    root->setProperty("params", juce::var(params));
+    const auto file = folder.getChildFile(juce::File::createLegalFileName(clean) + ".json");
+    if (!file.replaceWithText(juce::JSON::toString(juce::var(root), juce::JSON::FormatOptions {}.withSpacing(juce::JSON::Spacing::multiLine).withMaxDecimalPlaces(4)))) { error = "Could not write " + file.getFullPathName(); return false; }
+    refreshUserPresets();
+    presetName = clean;
+    presetIndex = (int) factoryPresets().size() + std::max(0, userPresets.indexOf(file));
+    return true;
+}
+
+bool ChillerProcessor::loadUserPreset(const juce::File& file, juce::String& error)
+{
+    const auto json = juce::JSON::parse(file);
+    const auto* obj = json.getDynamicObject();
+    const auto* ps = obj ? json["params"].getDynamicObject() : nullptr;
+    if (ps == nullptr) { error = file.getFileName() + " is not a Chiller preset"; return false; }
+    std::vector<std::pair<int, float>> values;
+    for (const auto& prop : ps->getProperties()) {
+        const int id = findParam(prop.name.toString().toStdString());
+        if (id >= 0) values.emplace_back(id, (float) (double) prop.value);
+    }
+    auto s = captureState();
+    applyPresetValues(s, values);
+    applyState(s);
+    presetName = json["name"].toString().isNotEmpty() ? json["name"].toString() : file.getFileNameWithoutExtension();
+    historyCommit();
+    return true;
 }
 
 void ChillerProcessor::historyCommit()
